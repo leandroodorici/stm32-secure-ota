@@ -1,0 +1,14 @@
+#!/bin/sh
+# Format staged C sources before they become a commit
+
+files=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(c|h)$')
+[ -z "$files" ] && exit 0
+
+if ! command -v clang-format >/dev/null 2>&1; then
+    echo "clang-format not installed; skipping format check."
+    exit 0
+fi
+
+# Reformat in place, then re-stage. The commit made is the formatted one.
+echo "$files" | xargs clang-format -i
+echo "$files" | xargs git add
