@@ -27,7 +27,7 @@ jobs:
     name: No key material committed
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Fail if a key file is tracked
         run: |
@@ -41,7 +41,7 @@ jobs:
         # Catches a key pasted into a script, doc, or test fixture, which the
         # extension check above would miss.
         run: |
-          if git grep -I -l -- "-----BEGIN .*PRIVATE KEY-----"; then
+          if git grep -I -l -E -- "-----BEGIN [A-Z ]*PRIVATE KEY-----"; then
             echo "::error::A private key block is committed. Rotate the key."
             exit 1
           fi
@@ -53,7 +53,7 @@ jobs:
     name: Format check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install clang-format
         run: |
