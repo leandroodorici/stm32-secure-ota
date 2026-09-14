@@ -47,6 +47,33 @@ jobs:
           fi
           echo "No private key blocks found."
 
+  host-tests:
+    name: Host tests (${{ matrix.compiler }}, sanitizers ${{ matrix.sanitizers }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { compiler: gcc,   sanitizers: "ON"  }
+          - { compiler: clang, sanitizers: "ON"  }
+          - { compiler: gcc,   sanitizers: "OFF" }
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build
+          [ "${{ matrix.compiler }}" = "clang" ] && sudo apt-get install -y clang || true
+      - name: Configure
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_C_COMPILER=${{ matrix.compiler }} \
+            -DENABLE_SANITIZERS=${{ matrix.sanitizers }}
+      - name: Build
+        run: cmake --build build
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
   # Formatting is checked rather than applied, so the diff a reviewer sees is
   # only the change itself, never a reformatting of untouched lines.
   format:
