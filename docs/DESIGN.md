@@ -401,7 +401,7 @@ without assuming the transport provides a strong check.
 
 Acknowledgement is stop-and-wait per chunk. A sliding window would help on a
 slow link but is unnecessary at CAN speeds, and adding it now would be
-optimising something that has not been measured.
+optimizing something that has not been measured.
 
 Resume works because chunks are written directly to flash as they arrive.
 After a reset the node reports the highest contiguous offset it has written and
@@ -423,7 +423,7 @@ assumption:
 - Malformed input is rejected during bounds checking, before any header field
   influences behaviour.
 
-The gateway's signature check is an optimisation, not a security boundary. It
+The gateway's signature check is an optimization, not a security boundary. It
 prevents a bad image from consuming node energy and airtime. A compromised
 gateway can refuse to deliver updates, which is a denial of service, but it
 cannot cause code to run.
@@ -434,18 +434,28 @@ with a throwaway key generated on the runner.
 
 ### Out of scope
 
-Physical attackers with debug access, fault injection, and side channels are
-not addressed. A production device would set readout protection to lock debug,
-write-protect the bootloader region through the option bytes, and store the
-public key and security floor in one-time-programmable memory or the G4's
-securable memory area.
+Three physical-access threats, excluded for three different reasons.
 
-Side channels are not a concern for the signature path specifically, because
-the node only verifies, and verification operates on public data.
+**Debug access.** An attacker with SWD can read flash, rewrite the security
+floor, and replace the bootloader. This is a provisioning problem rather than a
+design problem: readout protection locks debug, write protection covers the
+bootloader region, and OTP or the securable memory area holds the public key
+and floor. Not applied here because RDP level 2 is irreversible and there is
+one board.
 
-Image confidentiality is out of scope. Integrity and authenticity are the
-properties that determine whether the device is safe. Encrypting images would
-add key distribution and storage problems without addressing either.
+**Fault injection.** Glitching the branch that acts on a verification result
+would run an unsigned image. This is a real gap. The side-channel argument
+below does not cover it, since the attacker corrupts control flow rather than
+recovering a secret. Countermeasures such as redundant comparisons, separate
+verification paths and randomized delays all need a glitching rig to validate,
+and none of them changes anything else in this design. Deferred on cost.
+
+**Side channels.** Not applicable. ECDSA verification consumes only public
+values: the key, the hash, the signature. There is no secret to recover, which
+is why verification needs no constant-time implementation while signing does.
+This holds only because the node stores no secrets at all. Adding one, such as
+a decryption key, would make side-channel resistance a requirement (see
+section 13).
 
 ## 11. Testing
 
@@ -514,15 +524,55 @@ an error indication. Whether that is preferable to a minimal recovery mode is
 not settled. A recovery mode means transport code in the bootloader, which
 section 8.1 argues against.
 
-## 13. Explicitly not included
+## 13. Deferred and declined
 
-Firmware encryption, delta and compressed updates, multi-node update
-campaigns, a sub-GHz radio, USB DFU, and an RTOS in the bootloader.
+### Deferred
+
+Delta and compressed updates, multi-node update campaigns, a sub-GHz radio,
+and USB DFU.
+
+None of these changes a decision in this document. Each could be added later
+without revisiting the flash layout, the image format, the boot state machine
+or the trust model, which is the test applied here: not whether something is
+hard, but whether having it would have produced a different design.
 
 Delta updates and multicast delivery would be the first additions for a real
 low-bandwidth fleet, where image size dominates transfer time and one
-transmission could serve many nodes. Neither changes any decision above, which
-is why they are deferred rather than designed around.
+transmission could serve many nodes. USB DFU is excluded on different grounds:
+it is a second update path into the device, which means more attack surface to
+solve a problem this design assumes away.
+
+### Declined
+
+An RTOS in the bootloader, for the reason given in section 8.1. The bootloader
+cannot be repaired in the field, so the only large dependency it carries is the
+signature verification it cannot function without.
+
+### Firmware encryption
+
+Signed but unencrypted is a deliberate choice rather than an omission, and is
+treated here as a stretch goal with known prerequisites.
+
+Encryption protects intellectual property. It does not protect device
+integrity, which is what signatures do. Secure boot and image encryption are
+independently selectable features in every major embedded stack for this
+reason, and plenty of shipped products enable the first without the second. It
+is expected in payments, media and defence, and routinely omitted in industrial
+and consumer devices where the transport is already encrypted.
+
+What adding it would require:
+
+- A decryption key stored on a device an attacker can hold. That means OTP, a
+  secure element, or wrapping through a hardware unique key, and a decision
+  about whether keys are per-device or fleet-wide.
+- Constant-time AES. Once the device holds a secret, the side-channel argument
+  in section 10 no longer applies.
+- A different install path. An encrypted image cannot execute in place, so it
+  would have to be decrypted into the slot on write, leaving plaintext in flash
+  regardless. Without encrypted execution, encryption protects the image in
+  transit and at rest on the gateway, not on the node itself.
+
+That last point is the reason it is a stretch goal rather than a priority.
 
 ## 14. Milestones
 
