@@ -12,8 +12,9 @@ target_link_libraries(sim_flash PUBLIC ota_core)
 
 function(add_host_test name)
     add_executable(${name} ${name}.c)
-    target_link_libraries(${name} PRIVATE ota_core)
+    target_link_libraries(${name} PRIVATE ota_core sim_flash)
     add_test(NAME ${name} COMMAND ${name})
 endfunction()
 
 # add_host_test(...) entries land here as tests are written
+add_host_test(test_sim_flash)

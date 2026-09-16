@@ -53,9 +53,9 @@ void sim_flash_arm_cut(sim_flash_t *sf, long n, bool tear)
 // must not touch memory at all. Sets *partial for the single operation that is
 // interrupted mid-flight.
 //
-// The >= rather than == matters: once the cut happens every later operation is
-// dead too. Without that, a test could "recover" by performing writes a
-// powerless device could never have performed.
+// The "powered" flag is what keeps the device dead after a cut. The >= in the
+// condition below is redundant given that early return, and is kept only as a
+// second line of defence if the flag handling is ever restructured.
 static bool gate(sim_flash_t *sf, bool *partial)
 {
     *partial = false;
