@@ -20,14 +20,12 @@
 static sim_flash_t sf;
 static flash_if_t f;
 
-static void setup(void)
-{
+static void setup(void) {
     sim_flash_init(&sf);
     sim_flash_bind(&sf, &f);
 }
 
-static uint64_t read_dw(uint32_t addr)
-{
+static uint64_t read_dw(uint32_t addr) {
     uint64_t v = 0;
     flash_read(&f, addr, &v, sizeof(v));
     return v;
@@ -35,23 +33,20 @@ static uint64_t read_dw(uint32_t addr)
 
 // ---- basic semantics ----
 
-static void test_starts_erased(void)
-{
+static void test_starts_erased(void) {
     setup();
     CHECK_EQ(read_dw(PAGE0), (long long)FLASH_ERASED_DW);
     CHECK_EQ(read_dw(PAGE1 + 512u), (long long)FLASH_ERASED_DW);
 }
 
-static void test_program_then_read(void)
-{
+static void test_program_then_read(void) {
     setup();
     CHECK_EQ(flash_program_dw(&f, PAGE0, 0x0123456789ABCDEFull), FLASH_OK);
     CHECK_EQ(read_dw(PAGE0), (long long)0x0123456789ABCDEFull);
     CHECK_EQ(sf.programs, 1);
 }
 
-static void test_erase_restores_ff(void)
-{
+static void test_erase_restores_ff(void) {
     setup();
     flash_program_dw(&f, PAGE0, 0x1122334455667788ull);
     flash_program_dw(&f, PAGE0 + 64u, 0x99AABBCCDDEEFF00ull);
@@ -61,8 +56,7 @@ static void test_erase_restores_ff(void)
     CHECK_EQ(sf.erases, 1);
 }
 
-static void test_erase_is_page_scoped(void)
-{
+static void test_erase_is_page_scoped(void) {
     // Page rotation erases the spare page while the only valid record lives in
     // the other one. If erase bled across pages, that design would be unsafe.
     setup();
@@ -73,8 +67,7 @@ static void test_erase_is_page_scoped(void)
 
 // ---- the constraint that shapes the design ----
 
-static void test_cannot_reprogram_written_doubleword(void)
-{
+static void test_cannot_reprogram_written_doubleword(void) {
     // The most important behaviour to model correctly. The G4 stores an ECC
     // syndrome per double-word, so a second write would leave data and
     // syndrome inconsistent and the controller refuses it.
@@ -88,8 +81,7 @@ static void test_cannot_reprogram_written_doubleword(void)
     CHECK_EQ(read_dw(PAGE0), (long long)0x1111111111111111ull);
 }
 
-static void test_cannot_even_clear_more_bits(void)
-{
+static void test_cannot_even_clear_more_bits(void) {
     // Separate from the test above because this is where intuition from plain
     // NOR flash misleads. Without ECC you may clear further bits in place,
     // which is how a confirmed flag is often implemented. With a syndrome per
@@ -99,8 +91,7 @@ static void test_cannot_even_clear_more_bits(void)
     CHECK_EQ(flash_program_dw(&f, PAGE0, 0xFFFFFFFFFFFFFF00ull), FLASH_ERR_NOT_ERASED);
 }
 
-static void test_program_after_erase_is_allowed(void)
-{
+static void test_program_after_erase_is_allowed(void) {
     // The counterpart: erasing genuinely frees the location. Without this the
     // two tests above could pass because the model refuses everything.
     setup();
@@ -112,21 +103,18 @@ static void test_program_after_erase_is_allowed(void)
 
 // ---- alignment and bounds ----
 
-static void test_rejects_misaligned_program(void)
-{
+static void test_rejects_misaligned_program(void) {
     setup();
     CHECK_EQ(flash_program_dw(&f, PAGE0 + 4u, 0x1234ull), FLASH_ERR_ALIGN);
     CHECK_EQ(flash_program_dw(&f, PAGE0 + 1u, 0x1234ull), FLASH_ERR_ALIGN);
 }
 
-static void test_rejects_misaligned_erase(void)
-{
+static void test_rejects_misaligned_erase(void) {
     setup();
     CHECK_EQ(flash_erase_page(&f, PAGE0 + 8u), FLASH_ERR_ALIGN);
 }
 
-static void test_rejects_out_of_range(void)
-{
+static void test_rejects_out_of_range(void) {
     setup();
     CHECK_EQ(flash_program_dw(&f, SIM_BASE - 8u, 0ull), FLASH_ERR_RANGE);
     CHECK_EQ(flash_program_dw(&f, SIM_BASE + SIM_SIZE, 0ull), FLASH_ERR_RANGE);
@@ -135,14 +123,12 @@ static void test_rejects_out_of_range(void)
     // A read starting inside but running past the end must be refused rather
     // than truncated. Silently short reads are how parsers get confused.
     uint8_t buf[16];
-    CHECK_EQ(flash_read(&f, SIM_BASE + SIM_SIZE - 8u, buf, sizeof(buf)),
-             FLASH_ERR_RANGE);
+    CHECK_EQ(flash_read(&f, SIM_BASE + SIM_SIZE - 8u, buf, sizeof(buf)), FLASH_ERR_RANGE);
 }
 
 // ---- fault injection ----
 
-static void test_clean_cut_leaves_flash_untouched(void)
-{
+static void test_clean_cut_leaves_flash_untouched(void) {
     setup();
     flash_program_dw(&f, PAGE0, 0x1111111111111111ull);
 
@@ -154,8 +140,7 @@ static void test_clean_cut_leaves_flash_untouched(void)
     CHECK_EQ(read_dw(PAGE0 + 8u), (long long)FLASH_ERASED_DW);
 }
 
-static void test_torn_write_raises_ecc_on_read(void)
-{
+static void test_torn_write_raises_ecc_on_read(void) {
     // The important one. A torn double-word must not read back as half-written
     // data, because code would then act on bytes that were never committed.
     setup();
@@ -167,8 +152,7 @@ static void test_torn_write_raises_ecc_on_read(void)
     CHECK_EQ(flash_read(&f, PAGE0, &v, sizeof(v)), FLASH_ERR_ECC);
 }
 
-static void test_ecc_fault_covers_any_overlapping_read(void)
-{
+static void test_ecc_fault_covers_any_overlapping_read(void) {
     // A read that merely touches a damaged double-word must fail rather than
     // returning the good bytes around it.
     setup();
@@ -182,8 +166,7 @@ static void test_ecc_fault_covers_any_overlapping_read(void)
     CHECK_EQ(flash_read(&f, PAGE0, buf, 16u), FLASH_OK);
 }
 
-static void test_torn_doubleword_cannot_be_reprogrammed(void)
-{
+static void test_torn_doubleword_cannot_be_reprogrammed(void) {
     // The space is spent until the page is erased. Any recovery design that
     // assumes it can rewrite the damaged entry in place is wrong.
     setup();
@@ -196,8 +179,7 @@ static void test_torn_doubleword_cannot_be_reprogrammed(void)
     CHECK_EQ(flash_program_dw(&f, PAGE0, 0x1111111111111111ull), FLASH_OK);
 }
 
-static void test_nothing_happens_after_the_cut(void)
-{
+static void test_nothing_happens_after_the_cut(void) {
     // Once power is gone it stays gone until reboot. Without this a test could
     // accidentally recover by performing writes a dead device could not have.
     setup();
@@ -213,8 +195,7 @@ static void test_nothing_happens_after_the_cut(void)
     CHECK_EQ(sf.erases, 0);
 }
 
-static void test_cut_lands_on_the_nth_operation(void)
-{
+static void test_cut_lands_on_the_nth_operation(void) {
     // The sweep in the next step enumerates cut points by number, so the
     // injector must interrupt exactly the operation asked for. An off-by-one
     // here would silently skip a cut point and nobody would notice.
@@ -233,8 +214,7 @@ static void test_cut_lands_on_the_nth_operation(void)
     CHECK_EQ(sf.programs, 2);
 }
 
-static void test_partial_erase_leaves_page_mixed(void)
-{
+static void test_partial_erase_leaves_page_mixed(void) {
     // A cut during erase leaves some of the page erased and some not, which is
     // why erase ordering matters in the boot state design.
     setup();
@@ -249,8 +229,7 @@ static void test_partial_erase_leaves_page_mixed(void)
     CHECK_EQ(read_dw(PAGE0 + FLASH_PAGE_SIZE - 8u), (long long)0x5555555555555555ull);
 }
 
-static void test_reboot_preserves_contents(void)
-{
+static void test_reboot_preserves_contents(void) {
     // If the model got this wrong every recovery test would pass vacuously.
     setup();
     flash_program_dw(&f, PAGE0, 0xABCDEF0123456789ull);

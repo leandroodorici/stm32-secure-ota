@@ -2,8 +2,7 @@
 
 #include <string.h>
 
-static bool in_range(uint32_t addr, uint32_t len)
-{
+static bool in_range(uint32_t addr, uint32_t len) {
     if (addr < SIM_BASE) {
         return false;
     }
@@ -11,13 +10,11 @@ static bool in_range(uint32_t addr, uint32_t len)
     return (off + len) <= SIM_SIZE;
 }
 
-static uint32_t dw_index(uint32_t addr)
-{
+static uint32_t dw_index(uint32_t addr) {
     return (addr - SIM_BASE) / FLASH_DW_SIZE;
 }
 
-void sim_flash_init(sim_flash_t *sf)
-{
+void sim_flash_init(sim_flash_t *sf) {
     memset(sf->mem, FLASH_ERASED_BYTE, sizeof(sf->mem));
     memset(sf->ecc_bad, 0, sizeof(sf->ecc_bad));
     sf->ops = 0;
@@ -28,8 +25,7 @@ void sim_flash_init(sim_flash_t *sf)
     sf->programs = 0;
 }
 
-void sim_flash_reboot(sim_flash_t *sf)
-{
+void sim_flash_reboot(sim_flash_t *sf) {
     sf->ops = 0;
     sf->cut_after = -1;
     sf->tear_on_cut = false;
@@ -39,8 +35,7 @@ void sim_flash_reboot(sim_flash_t *sf)
     // vacuously.
 }
 
-void sim_flash_arm_cut(sim_flash_t *sf, long n, bool tear)
-{
+void sim_flash_arm_cut(sim_flash_t *sf, long n, bool tear) {
     sf->ops = 0;
     sf->cut_after = n;
     sf->tear_on_cut = tear;
@@ -56,8 +51,7 @@ void sim_flash_arm_cut(sim_flash_t *sf, long n, bool tear)
 // The "powered" flag is what keeps the device dead after a cut. The >= in the
 // condition below is redundant given that early return, and is kept only as a
 // second line of defence if the flag handling is ever restructured.
-static bool gate(sim_flash_t *sf, bool *partial)
-{
+static bool gate(sim_flash_t *sf, bool *partial) {
     *partial = false;
     if (!sf->powered) {
         return false;
@@ -74,8 +68,7 @@ static bool gate(sim_flash_t *sf, bool *partial)
     return true;
 }
 
-static flash_status_t sim_erase(void *ctx, uint32_t addr)
-{
+static flash_status_t sim_erase(void *ctx, uint32_t addr) {
     sim_flash_t *sf = (sim_flash_t *)ctx;
     if (addr % FLASH_PAGE_SIZE != 0) {
         return FLASH_ERR_ALIGN;
@@ -102,8 +95,7 @@ static flash_status_t sim_erase(void *ctx, uint32_t addr)
     return FLASH_OK;
 }
 
-static flash_status_t sim_program(void *ctx, uint32_t addr, uint64_t data)
-{
+static flash_status_t sim_program(void *ctx, uint32_t addr, uint64_t data) {
     sim_flash_t *sf = (sim_flash_t *)ctx;
     if (addr % FLASH_DW_SIZE != 0) {
         return FLASH_ERR_ALIGN;
@@ -146,8 +138,7 @@ static flash_status_t sim_program(void *ctx, uint32_t addr, uint64_t data)
     return FLASH_OK;
 }
 
-static flash_status_t sim_read(void *ctx, uint32_t addr, void *dst, size_t len)
-{
+static flash_status_t sim_read(void *ctx, uint32_t addr, void *dst, size_t len) {
     sim_flash_t *sf = (sim_flash_t *)ctx;
     if (!in_range(addr, (uint32_t)len)) {
         return FLASH_ERR_RANGE;
@@ -168,8 +159,7 @@ static flash_status_t sim_read(void *ctx, uint32_t addr, void *dst, size_t len)
     return FLASH_OK;
 }
 
-void sim_flash_bind(sim_flash_t *sf, flash_if_t *out)
-{
+void sim_flash_bind(sim_flash_t *sf, flash_if_t *out) {
     out->erase_page = sim_erase;
     out->program_dw = sim_program;
     out->read = sim_read;

@@ -42,8 +42,7 @@ extern int g_tests_failed;
 #define TEST_MAIN_BEGIN(suite)                                                           \
     int g_tests_run = 0;                                                                 \
     int g_tests_failed = 0;                                                              \
-    int main(void)                                                                       \
-    {                                                                                    \
+    int main(void) {                                                                     \
         printf("== %s ==\n", suite);
 
 // Non-zero exit on failure is what ctest and CI key off.
