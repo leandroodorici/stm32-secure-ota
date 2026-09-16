@@ -5,6 +5,11 @@
 add_library(ota_core INTERFACE)
 target_include_directories(ota_core INTERFACE ${CMAKE_SOURCE_DIR}/common/include)
 
+# Flash simulator
+add_library(sim_flash STATIC sim_flash.c)
+target_include_directories(sim_flash PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(sim_flash PUBLIC ota_core)
+
 function(add_host_test name)
     add_executable(${name} ${name}.c)
     target_link_libraries(${name} PRIVATE ota_core)
