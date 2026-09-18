@@ -19,3 +19,4 @@ endfunction()
 # add_host_test(...) entries land here as tests are written
 add_host_test(test_sim_flash)
 add_host_test(test_boot_record)
+add_host_test(test_powerfail)
