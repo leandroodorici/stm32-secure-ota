@@ -53,3 +53,30 @@ dkms.conf
 
 # debug information files
 *.dwo
+
+# Key material
+# A signing key in git history cannot be fixed by deleting the file
+# The key must be rotated and every image re-signed
+keys/*
+!keys/README.md
+!keys/.gitkeep
+*.pem
+*.key
+*.p8
+*.pfx
+
+# Embedded build output
+build/
+build-*/
+*.elf
+*.bin
+*.hex
+*.map
+*.img
+
+# Generated from the public key
+bootloader/pubkey.c
+
+# Python virtual environment
+.venv/
+__pycache__/

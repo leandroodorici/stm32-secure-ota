@@ -1,0 +1,143 @@
+name: CI
+
+# Runs on pushes to the two branches in this repo, and on every PR into them.
+# Feature branches are covered through their PR, which keeps runner minutes
+# down without letting anything reach dev unverified.
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+
+# A newer push to the same branch cancels the previous run. Only the latest
+# commit's result is meaningful.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # The most important check in this repository.
+  #
+  # The bootloader's entire security model rests on one private key. If that
+  # key ever lands in git history, deleting the file does not fix it: anyone
+  # who cloned the repo has it, and the only real remedy is generating a new
+  # key, rebuilding the bootloader, reflashing over SWD, and re-signing every
+  # image. Catching it at PR time is the one cheap moment.
+  secrets:
+    name: No key material committed
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Fail if a key file is tracked
+        run: |
+          if git ls-files | grep -E '\.(pem|key|p8|pfx)$'; then
+            echo "::error::A key file is tracked in git. Remove it and rotate the key."
+            exit 1
+          fi
+          echo "No key files tracked."
+
+      - name: Fail if a private key block is committed
+        # Catches a key pasted into a script, doc, or test fixture, which the
+        # extension check above would miss.
+        run: |
+          if git grep -I -l -E -- "-----BEGIN [A-Z ]*PRIVATE KEY-----"; then
+            echo "::error::A private key block is committed. Rotate the key."
+            exit 1
+          fi
+          echo "No private key blocks found."
+
+  host-tests:
+    name: Host tests (${{ matrix.compiler }}, sanitizers ${{ matrix.sanitizers }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { compiler: gcc,   sanitizers: "ON"  }
+          - { compiler: clang, sanitizers: "ON"  }
+          - { compiler: gcc,   sanitizers: "OFF" }
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build
+          if [ "${{ matrix.compiler }}" = "clang" ]; then
+            sudo apt-get install -y clang
+          fi
+
+      - name: Configure
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_C_COMPILER=${{ matrix.compiler }} \
+            -DENABLE_SANITIZERS=${{ matrix.sanitizers }}
+      - name: Build
+        run: cmake --build build
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+  # Scoped to common/ because that is the code that ships to the device.
+  # --error-exitcode makes findings fail the build instead of scrolling past.
+  static-analysis:
+    name: Static analysis
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install cppcheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cppcheck
+
+      - name: Run cppcheck
+        run: |
+          cppcheck --enable=warning,style,performance,portability \
+                   --error-exitcode=1 \
+                   --inline-suppr \
+                   --std=c11 \
+                   --suppress=missingIncludeSystem \
+                   -I common/include \
+                   common/
+  # Formatting is checked rather than applied, so the diff a reviewer sees is
+  # only the change itself, never a reformatting of untouched lines.
+  format:
+    name: Format check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install clang-format
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-format
+
+      - name: Check formatting
+        # Passes cleanly when no sources exist yet, so this job is green from
+        # the first commit and starts doing real work as soon as code lands.
+        run: |
+          files=$(find common bootloader app transports tests \
+                    \( -name '*.c' -o -name '*.h' \) 2>/dev/null || true)
+          if [ -z "$files" ]; then
+            echo "No C sources yet; nothing to check."
+            exit 0
+          fi
+          echo "$files" | xargs clang-format --dry-run --Werror
+
+  # CI builds its own environment from requirements.txt, so the pinned
+  # dependency version is what gets tested, not whatever is on a dev machine.
+  imgtool:
+    name: Image tool
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r tools/requirements.txt
+
+      - name: Run tests
+        run: python3 tools/test_imgtool.py

@@ -1,0 +1,10 @@
+# Code style for this project.
+BasedOnStyle: LLVM
+IndentWidth: 4
+ColumnLimit: 90
+PointerAlignment: Right
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortIfStatementsOnASingleLine: false
+AlwaysBreakAfterReturnType: None
+SortIncludes: true
+IncludeBlocks: Preserve
