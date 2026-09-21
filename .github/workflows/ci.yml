@@ -63,7 +63,10 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y cmake ninja-build
-          [ "${{ matrix.compiler }}" = "clang" ] && sudo apt-get install -y clang || true
+          if [ "${{ matrix.compiler }}" = "clang" ]; then
+            sudo apt-get install -y clang
+          fi
+
       - name: Configure
         run: |
           cmake -S . -B build -G Ninja \
@@ -74,6 +77,28 @@ jobs:
       - name: Test
         run: ctest --test-dir build --output-on-failure
 
+  # Scoped to common/ because that is the code that ships to the device.
+  # --error-exitcode makes findings fail the build instead of scrolling past.
+  static-analysis:
+    name: Static analysis
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install cppcheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cppcheck
+
+      - name: Run cppcheck
+        run: |
+          cppcheck --enable=warning,style,performance,portability \
+                   --error-exitcode=1 \
+                   --inline-suppr \
+                   --std=c11 \
+                   --suppress=missingIncludeSystem \
+                   -I common/include \
+                   common/
   # Formatting is checked rather than applied, so the diff a reviewer sees is
   # only the change itself, never a reformatting of untouched lines.
   format:
@@ -98,3 +123,21 @@ jobs:
             exit 0
           fi
           echo "$files" | xargs clang-format --dry-run --Werror
+
+  # CI builds its own environment from requirements.txt, so the pinned
+  # dependency version is what gets tested, not whatever is on a dev machine.
+  imgtool:
+    name: Image tool
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r tools/requirements.txt
+
+      - name: Run tests
+        run: python3 tools/test_imgtool.py
