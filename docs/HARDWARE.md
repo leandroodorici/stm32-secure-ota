@@ -60,16 +60,6 @@ matter for the wake-from-Standby verification policy discussed in section 12.
 
 ## Unverified
 
-**Boot source and reset pin behaviour.** `nSWBOOT0 = 0`, `nBOOT0 = 1` and
-`NRST_MODE = 3` together determine whether the part boots from main flash
-without a debugger attached, and how the reset pin behaves. The bit values
-have not been interpreted against RM0440 and the behaviour has not been
-observed.
-
-The test is empirical and happens naturally during M1: flash a blinking LED,
-detach the debugger, power cycle from USB alone. If it blinks, boot from main
-flash works. If it does not, these three bits are the first place to look.
-
 **ECC fault on a torn double-word.** The flash simulator models an interrupted
 program as leaving a double-word that faults on read rather than returning
 partial data. This is taken from RM0440 and has not been observed on silicon.
@@ -79,6 +69,26 @@ fault.
 
 **CAN transceiver logic level.** Not yet checked. Read the part number off the chip and confirm against its
 datasheet before wiring anything in M4.
+
+## Confirmed on hardware
+
+**Boot from main flash.** Verified 2026-09-25 by flashing the bootloader and a
+blinking application, detaching the debugger, and power cycling from USB alone.
+The LED blinked, so the part boots from main flash without a probe attached and
+the `nSWBOOT0 = 0`, `nBOOT0 = 1`, `NRST_MODE = 3` combination needs no change.
+
+**Dual-bank mode and RDP level, independently.** OpenOCD reports
+`flash mode : dual-bank` and `RDP level 0 (0xAA)` on every connect, which
+matches the option byte export from a different tool.
+
+**Application handover.** With the bootloader at 0x08000000 and an application
+at 0x08010000, GDB confirms the core executing in the application's code region
+with VTOR reading 0x08010000 and the main stack pointer at the application's
+`_estack`. Vector table relocation and the stack pointer switch both work.
+
+**OTP.** 1024 bytes at 0x1fff7000, per OpenOCD. Unused. Section 10 of
+DESIGN.md names this as where a production device would store the public key
+and the anti-rollback floor.
 
 ## Do not do these
 

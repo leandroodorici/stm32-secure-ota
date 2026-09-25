@@ -1,0 +1,55 @@
+/* Application, slot A: bank 1, after the bootloader and boot state region.
+ *
+ * This file and app_slot_b.ld differ only in ORIGIN. That single line is the
+ * A/B design from section 8.2: each release is linked twice, and the
+ * bootloader rejects any image whose load_addr does not match the slot it
+ * physically occupies.
+ */
+
+MEMORY
+{
+    FLASH (rx)  : ORIGIN = 0x08010000, LENGTH = 192K
+    RAM   (rwx) : ORIGIN = 0x20000000, LENGTH = 96K
+}
+
+/* Top of RAM. The stack grows downward from here. */
+_estack = ORIGIN(RAM) + LENGTH(RAM);
+
+/* The root for --gc-sections. Without it the collector finds nothing
+ * referenced and discards the entire program. */
+ENTRY(Reset_Handler)
+
+SECTIONS
+{
+    /* Must be first. The bootloader sets VTOR to this address, and the core
+     * reads the initial stack pointer and reset vector from the first two
+     * words. */
+    .isr_vector : {
+        KEEP(*(.isr_vector))
+    } > FLASH
+
+    .text : {
+        *(.text*)
+        *(.rodata*)
+    } > FLASH
+
+    /* Initialised data lives in flash and is copied to RAM at startup.
+     * _sidata is where it lives, _sdata/_edata where it goes. */
+    _sidata = LOADADDR(.data);
+    .data : {
+        _sdata = .;
+        *(.data*)
+        . = ALIGN(4);
+        _edata = .;
+    } > RAM AT > FLASH
+
+    /* Zero-initialised data occupies no flash, only an address range that
+     * startup code clears. */
+    .bss : {
+        _sbss = .;
+        *(.bss*)
+        *(COMMON)
+        . = ALIGN(4);
+        _ebss = .;
+    } > RAM
+}
