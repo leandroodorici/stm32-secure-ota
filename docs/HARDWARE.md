@@ -1,0 +1,103 @@
+# Hardware notes
+
+Board configuration and the checks behind it. Everything here is either
+observed on the bench or explicitly marked as unverified. Claims taken from a
+datasheet and never confirmed are noted as such, because the flash simulator
+in `tests/host/` models several of these behaviours and its fidelity is what
+every downstream correctness claim rests on.
+
+## Boards
+
+| Board | Role | Status |
+|-------|------|--------|
+| NUCLEO-G474RE | Node | In hand, option bytes read |
+| ESP32-S3 dev board | Gateway | In hand, not yet used |
+| Second ESP32-S3 | Reserved for irreversible experiments | In hand, untouched |
+
+## Option bytes
+
+Read 2026-09-25 with STM32CubeProgrammer. Full export in
+`docs/option-bytes-2026-09-25.json`. Device ID 1129 (0x469), which is the
+STM32G47x/G48x family.
+
+### Confirmed for the design
+
+**`DBANK = 1`.** Dual-bank mode is active. This is the one that had to be
+right: the flash layout in section 4 of DESIGN.md assumes two banks of 256 KB
+with 2 KB pages, and places one application slot in each bank so the update
+agent always writes to a bank it is not executing from. No option byte change
+was needed, so no mass erase.
+
+**`RDP = 0xAA`.** Readout protection level 0. Debug access is open, which is
+correct for development.
+
+**`BFB2 = 0`.** Boot from bank 1. The hardware bank swap was rejected in
+section 8.2 in favour of A/B slots with slot-specific link addresses, so this
+stays at 0.
+
+**`IWDG_SW = 1`.** The independent watchdog is software-started. The boot flow
+in section 7 starts it explicitly as the first action after reset.
+
+### Protection features, all unconfigured
+
+| Feature | Value | Meaning |
+|---------|-------|---------|
+| WRP1A, WRP1B, WRP2A, WRP2B | start 127, end 0 | Empty regions: start above end means no area is protected |
+| PCROP1, PCROP2 | start 32767, end 0 | Same, no read-out protected code region |
+| SEC_SIZE1, SEC_SIZE2 | 0 | Securable memory area unused |
+| BOOT_LOCK | 0 | Boot entry not locked to main flash |
+
+A clean slate, which is what the production hardening in section 10 would
+later configure: write protection over the bootloader region, and the
+securable memory area or OTP holding the public key and the security floor.
+
+### Low-power behaviour, relevant later
+
+`IWDG_STOP = 1` and `IWDG_STDBY = 1` mean the independent watchdog keeps
+counting in Stop and Standby rather than freezing. Irrelevant to the current
+design, which never enters those modes, but these are the exact bits that
+matter for the wake-from-Standby verification policy discussed in section 12.
+
+## Unverified
+
+**Boot source and reset pin behaviour.** `nSWBOOT0 = 0`, `nBOOT0 = 1` and
+`NRST_MODE = 3` together determine whether the part boots from main flash
+without a debugger attached, and how the reset pin behaves. The bit values
+have not been interpreted against RM0440 and the behaviour has not been
+observed.
+
+The test is empirical and happens naturally during M1: flash a blinking LED,
+detach the debugger, power cycle from USB alone. If it blinks, boot from main
+flash works. If it does not, these three bits are the first place to look.
+
+**ECC fault on a torn double-word.** The flash simulator models an interrupted
+program as leaving a double-word that faults on read rather than returning
+partial data. This is taken from RM0440 and has not been observed on silicon.
+Section 12 of DESIGN.md tracks it as an open question. Confirming it means
+deliberately interrupting a program operation and observing the resulting
+fault.
+
+**CAN transceiver logic level.** Not yet checked. Read the part number off the chip and confirm against its
+datasheet before wiring anything in M4.
+
+## Do not do these
+
+**RDP level 2** on the G474. Irreversible, and there is one board.
+
+**eFuse burning** on the working ESP32-S3. One-time programmable by
+definition. The second board exists for that.
+
+**Changing `DBANK`.** It triggers a mass erase. Harmless now, worth knowing
+before doing it with firmware on the chip.
+
+## Measurements
+
+Populated as milestones complete. See `docs/RESULTS.md` for the full table.
+
+| Measurement | Value | Date |
+|-------------|-------|------|
+| Bootloader size | | |
+| Cold boot to application | | |
+| SHA-256 over a full slot | | |
+| ECDSA P-256 verify | | |
+| CAN throughput at 500 kbit/s | | |
