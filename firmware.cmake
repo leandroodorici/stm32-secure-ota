@@ -25,6 +25,7 @@ function(add_firmware name linker_script)
     # CMake does not track the linker script as a dependency on its own, so a
     # changed memory map would silently produce a stale binary.
     set_target_properties(${name} PROPERTIES
+        SUFFIX ".elf"
         LINK_DEPENDS ${CMAKE_SOURCE_DIR}/${linker_script}
     )
 
@@ -38,6 +39,13 @@ endfunction()
 add_firmware(bootloader bootloader/bootloader.ld
     bootloader/startup.c
     bootloader/main.c
+    bootloader/flash_stm32.c
+    common/boot_record.c
+)
+
+target_include_directories(bootloader PRIVATE
+    ${CMAKE_SOURCE_DIR}/common/include
+    ${CMAKE_SOURCE_DIR}/bootloader
 )
 
 add_firmware(app_slot_a app/app_slot_a.ld
