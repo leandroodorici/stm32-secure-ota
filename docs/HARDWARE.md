@@ -90,6 +90,14 @@ with VTOR reading 0x08010000 and the main stack pointer at the application's
 DESIGN.md names this as where a production device would store the public key
 and the anti-rollback floor.
 
+**Boot record on target.** Verified 2026-09-28. With blank boot-state pages
+and a bootable slot A, the bootloader took the factory path and wrote one
+record at 0x0800F000: seq 1, slot A primary and CONFIRMED, CRC `0x5eec803b`.
+That CRC was computed on the host beforehand, so `common/boot_record.c`
+serializes identically on target and in the host tests. After several resets
+and a power cycle the record was unchanged and the next entry still erased,
+confirming that a normal boot of a confirmed image performs no flash writes.
+
 ## Do not do these
 
 **RDP level 2** on the G474. Irreversible, and there is one board.
@@ -106,7 +114,7 @@ Populated as milestones complete. See `docs/RESULTS.md` for the full table.
 
 | Measurement | Value | Date |
 |-------------|-------|------|
-| Bootloader size | | |
+| Bootloader size | 2512 B text, 4 B bss (slot selection, no crypto yet) | 2026-09-28 |
 | Cold boot to application | | |
 | SHA-256 over a full slot | | |
 | ECDSA P-256 verify | | |
