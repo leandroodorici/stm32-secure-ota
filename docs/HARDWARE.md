@@ -98,6 +98,25 @@ serializes identically on target and in the host tests. After several resets
 and a power cycle the record was unchanged and the next entry still erased,
 confirming that a normal boot of a confirmed image performs no flash writes.
 
+**Watchdog and reset cause.** Verified 2026-09-28. The bootloader starts the
+IWDG at a nominal 4 s timeout and hands the RCC_CSR reset flags to the
+application in the first 32 bytes of SRAM. With the application's refresh
+removed, the part reset after about 4 s and the next boot reported
+`0x24000000` (IWDG + PIN); with it restored, the application ran
+indefinitely. A button press reports `0x04000000` (PIN), and an OpenOCD
+reset reports `0x14000000` (SW + PIN): OpenOCD resets through SYSRESETREQ.
+Flags are cleared on every boot, so each boot sees only its own cause.
+
+**The on-board ST-LINK resets the target after power-up.** Observed
+2026-09-28. After a power cycle the handoff reported only `0x04000000` (PIN).
+A temporary boot counter showed two boots since power-on, with `0x0C000000`
+(BOR + PIN) seen across them: the power-on reset is detected correctly, then
+the ST-LINK pulses NRST once it starts, and that second boot overwrites the
+reported cause. Two consequences on this board: every power cycle consumes
+two trial attempts rather than one, and reset-cause logic cannot rely on
+seeing a power-on as the most recent cause. Neither applies to a board
+without an on-board probe, but both matter for the repeated-reset tests.
+
 ## Do not do these
 
 **RDP level 2** on the G474. Irreversible, and there is one board.
@@ -114,7 +133,7 @@ Populated as milestones complete. See `docs/RESULTS.md` for the full table.
 
 | Measurement | Value | Date |
 |-------------|-------|------|
-| Bootloader size | 2512 B text, 4 B bss (slot selection, no crypto yet) | 2026-09-28 |
+| Bootloader size | 2604 B text, 4 B bss (slot selection, watchdog, reset cause; no crypto yet) | 2026-09-28 |
 | Cold boot to application | | |
 | SHA-256 over a full slot | | |
 | ECDSA P-256 verify | | |
