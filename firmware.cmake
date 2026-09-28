@@ -52,3 +52,7 @@ add_firmware(app_slot_a app/app_slot_a.ld
     app/startup.c
     app/main.c
 )
+
+target_include_directories(app_slot_a PRIVATE
+    ${CMAKE_SOURCE_DIR}/common/include
+)

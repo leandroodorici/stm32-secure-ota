@@ -1,5 +1,6 @@
 #include <stdint.h>
 
+#include "boot_handoff.h"
 #include "boot_record.h"
 #include "flash_stm32.h"
 
@@ -38,6 +39,59 @@
 #define NVIC_ICER ((volatile uint32_t *)0xE000E180u) // interrupt clear-enable
 #define NVIC_ICPR ((volatile uint32_t *)0xE000E280u) // interrupt clear-pending
 
+// Independent watchdog. Clocked from the ~32 kHz LSI, which starting
+// the watchdog turns on by itself. Once started, only a reset stops it.
+#define IWDG_KR (*(volatile uint32_t *)0x40003000u)
+#define IWDG_PR (*(volatile uint32_t *)0x40003004u)
+#define IWDG_RLR (*(volatile uint32_t *)0x40003008u)
+#define IWDG_SR (*(volatile uint32_t *)0x4000300Cu)
+#define IWDG_KEY_START 0xCCCCu
+#define IWDG_KEY_UNLOCK 0x5555u
+#define IWDG_KEY_REFRESH 0xAAAAu
+
+// 32 kHz / 128 = 250 Hz, and 1000 ticks at 250 Hz is 4 s. It has to
+// cover worst-case verification plus application startup; revisit
+// once M2 measures signature verification.
+#define IWDG_PR_DIV128 5u
+#define IWDG_RELOAD 999u
+
+#define RCC_CSR (*(volatile uint32_t *)0x40021094u)
+#define RCC_CSR_RMVF (1u << 23) // write 1 to clear all reset flags
+
+static void watchdog_start(void) {
+    IWDG_KR = IWDG_KEY_START;  // counting starts now, at the default timeout
+    IWDG_KR = IWDG_KEY_UNLOCK; // allow writes to PR and RLR
+    IWDG_PR = IWDG_PR_DIV128;
+    IWDG_RLR = IWDG_RELOAD;
+    // The new values cross into the slow LSI clock domain. SR reads zero once
+    // they have landed. If the LSI never runs this loops forever, but the
+    // watchdog is already counting and resets the part.
+    while (IWDG_SR != 0u) {
+    }
+    IWDG_KR = IWDG_KEY_REFRESH;
+}
+
+// The reset flags are sticky: they accumulate until cleared. Reading and then
+// clearing them means the next boot sees only the cause of its own reset.
+static void capture_reset_cause(void) {
+    uint32_t flags = RCC_CSR & RESET_FLAG_MASK;
+    RCC_CSR |= RCC_CSR_RMVF;
+
+    // TEMPORARY DIAGNOSTIC: count boots and accumulate reset flags since
+    // power-on, in the spare handoff words.
+    // volatile uint32_t *diag = (volatile uint32_t *)(BOOT_HANDOFF_ADDR + 8u);
+    // if (BOOT_HANDOFF->magic == BOOT_HANDOFF_MAGIC && diag[2] == 0xD1A60000u) {
+    //    diag[0]++;
+    //    diag[1] |= flags;
+    //} else {
+    //    diag[0] = 1u;
+    //    diag[1] = flags;
+    //    diag[2] = 0xD1A60000u;
+    //}
+    BOOT_HANDOFF->reset_flags = flags;
+    BOOT_HANDOFF->magic = BOOT_HANDOFF_MAGIC;
+}
+
 static uint32_t slot_base(uint8_t slot) {
     return (slot == 0u) ? SLOT_A_BASE : SLOT_B_BASE;
 }
@@ -70,6 +124,9 @@ static int slot_is_bootable(uint8_t slot) {
 }
 
 static void jump_to_app(uint32_t vector_addr) {
+    // Give the application a full timeout, however long slot selection took
+    IWDG_KR = IWDG_KEY_REFRESH;
+
     const uint32_t *vt = (const uint32_t *)vector_addr;
     uint32_t sp = vt[0];
     uint32_t pc = vt[1];
@@ -112,6 +169,12 @@ static void jump_to_app(uint32_t vector_addr) {
 }
 
 int main(void) {
+    // Started before anything else, so a hang anywhere after this point,
+    // including inside verification, still ends in a reset the next boot
+    // can count.
+    watchdog_start();
+    capture_reset_cause();
+
     flash_if_t flash;
     flash_stm32_bind(&flash);
 

@@ -9,7 +9,10 @@
 MEMORY
 {
     FLASH (rx)  : ORIGIN = 0x08010000, LENGTH = 192K
-    RAM   (rwx) : ORIGIN = 0x20000000, LENGTH = 96K
+    /* The first 32 bytes of SRAM hold the boot handoff from
+     * common/include/boot_handoff.h. Starting RAM after it means startup
+     * never zeroes it and no variable is placed on top of it. */
+    RAM   (rwx) : ORIGIN = 0x20000020, LENGTH = 96K - 32
 }
 
 /* Top of RAM. The stack grows downward from here. */
