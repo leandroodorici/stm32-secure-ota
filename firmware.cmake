@@ -56,3 +56,14 @@ add_firmware(app_slot_a app/app_slot_a.ld
 target_include_directories(app_slot_a PRIVATE
     ${CMAKE_SOURCE_DIR}/common/include
 )
+
+# Same sources as slot A, linked for bank 2. The two images are identical
+# apart from their addresses, per the A/B design in section 8.2.
+add_firmware(app_slot_b app/app_slot_b.ld
+    app/startup.c
+    app/main.c
+)
+
+target_include_directories(app_slot_b PRIVATE
+    ${CMAKE_SOURCE_DIR}/common/include
+)
