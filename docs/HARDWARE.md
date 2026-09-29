@@ -117,6 +117,17 @@ two trial attempts rather than one, and reset-cause logic cannot rely on
 seeing a power-on as the most recent cause. Neither applies to a board
 without an on-board probe, but both matter for the repeated-reset tests.
 
+**Trial boot and rollback.** Verified 2026-09-29. With slot B marked PENDING
+by a boot record written over SWD, the bootloader moved it to TRIAL and
+booted it three times, recording one attempt before each jump, then marked
+it REJECTED with reason 16 (NOT_CONFIRMED) and fell back to slot A with no
+further writes. Every record matched a value computed on the host beforehand,
+CRC included. Repeated with a slot B image that never refreshes the
+watchdog: the three trial boots ended in watchdog resets with no
+intervention, and the rollback followed. The PENDING record in that run
+deliberately carried a stale attempt count of 3. The bootloader restarted
+it at 1, so the image received its full three attempts.
+
 ## Do not do these
 
 **RDP level 2** on the G474. Irreversible, and there is one board.
