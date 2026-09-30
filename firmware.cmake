@@ -58,7 +58,7 @@ target_include_directories(app_slot_a PRIVATE
 )
 
 # Same sources as slot A, linked for bank 2. The two images are identical
-# apart from their addresses, per the A/B design in section 8.2.
+# apart from their addresses, per the A/B design.
 add_firmware(app_slot_b app/app_slot_b.ld
     app/startup.c
     app/main.c
@@ -67,3 +67,42 @@ add_firmware(app_slot_b app/app_slot_b.ld
 target_include_directories(app_slot_b PRIVATE
     ${CMAKE_SOURCE_DIR}/common/include
 )
+
+# ---- Mbed TLS verify path ----
+#
+# Pinned 3.6 LTS submodule. Only the sources the verify path needs are built,
+# against bootloader/boot_crypto_config.h, which replaces the library's default
+# configuration. Third-party code is built without the project's warning
+# flags, and its headers are included as system headers so that code which
+# includes them still builds with -Werror.
+set(MBEDTLS_DIR ${CMAKE_SOURCE_DIR}/third_party/mbedtls)
+
+add_library(boot_crypto STATIC
+    ${MBEDTLS_DIR}/library/asn1parse.c
+    ${MBEDTLS_DIR}/library/asn1write.c
+    ${MBEDTLS_DIR}/library/bignum.c
+    ${MBEDTLS_DIR}/library/bignum_core.c
+    ${MBEDTLS_DIR}/library/constant_time.c
+    ${MBEDTLS_DIR}/library/ecdsa.c
+    ${MBEDTLS_DIR}/library/ecp.c
+    ${MBEDTLS_DIR}/library/ecp_curves.c
+    ${MBEDTLS_DIR}/library/memory_buffer_alloc.c
+    ${MBEDTLS_DIR}/library/platform.c
+    ${MBEDTLS_DIR}/library/platform_util.c
+    ${MBEDTLS_DIR}/library/sha256.c
+)
+target_include_directories(boot_crypto SYSTEM PUBLIC
+    ${MBEDTLS_DIR}/include
+    ${CMAKE_SOURCE_DIR}/bootloader
+)
+target_compile_definitions(boot_crypto PUBLIC
+    MBEDTLS_CONFIG_FILE="boot_crypto_config.h"
+)
+target_compile_options(boot_crypto PRIVATE -w)
+
+# Runs from 0x08000000 in place of the bootloader
+add_firmware(crypto_bench bootloader/bootloader.ld
+    bootloader/startup.c
+    bench/crypto_bench.c
+)
+target_link_libraries(crypto_bench PRIVATE boot_crypto)
