@@ -128,6 +128,16 @@ intervention, and the rollback followed. The PENDING record in that run
 deliberately carried a stale attempt count of 3. The bootloader restarted
 it at 1, so the image received its full three attempts.
 
+**Cost of verification at the reset clock.** Measured 2026-09-30 with
+`bench/crypto_bench.c` flashed in place of the bootloader, timed with the
+DWT cycle counter at 16 MHz. A worst-case verification (full-slot SHA-256
+plus one ECDSA P-256 verify) takes 2.6 s. This fits one watchdog period,
+whose shortest value is ~4s, but two verifications in one boot do not. 
+A boot that rejects one slot and then verifies the other would be reset 
+partway through the second. If nothing recorded the first failure, the 
+next boot would repeat it indefinitely. The bootloader must therefore bound 
+the work between watchdog refreshes. Peak Mbed TLS heap use was 4948 bytes.
+
 ## Do not do these
 
 **RDP level 2** on the G474. Irreversible, and there is one board.
@@ -145,7 +155,8 @@ Populated as milestones complete. See `docs/RESULTS.md` for the full table.
 | Measurement | Value | Date |
 |-------------|-------|------|
 | Bootloader size | 2604 B text, 4 B bss (slot selection, watchdog, reset cause; no crypto yet) | 2026-09-28 |
+| Mbed TLS verify path | about 15.6 KB code (ECP, bignum, curve data, SHA-256, allocator) | 2026-09-30 |
 | Cold boot to application | | |
-| SHA-256 over a full slot | | |
-| ECDSA P-256 verify | | |
+| SHA-256 over a full slot | 901 ms at 16 MHz (14.41 M cycles, 73 cycles/byte), `MBEDTLS_SHA256_SMALLER` | 2026-09-30 |
+| ECDSA P-256 verify | 1707 ms at 16 MHz (27.30 M cycles), curve load included; 4948 B peak heap | 2026-09-30 |
 | CAN throughput at 500 kbit/s | | |
