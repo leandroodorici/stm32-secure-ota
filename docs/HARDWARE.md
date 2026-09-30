@@ -132,11 +132,18 @@ it at 1, so the image received its full three attempts.
 `bench/crypto_bench.c` flashed in place of the bootloader, timed with the
 DWT cycle counter at 16 MHz. A worst-case verification (full-slot SHA-256
 plus one ECDSA P-256 verify) takes 2.6 s. This fits one watchdog period,
-whose shortest value is ~4s, but two verifications in one boot do not. 
-A boot that rejects one slot and then verifies the other would be reset 
-partway through the second. If nothing recorded the first failure, the 
-next boot would repeat it indefinitely. The bootloader must therefore bound 
+whose shortest value is 3.76 s given the LSI tolerance, but two verifications 
+in one boot do not. A boot that rejects one slot and then verifies the other 
+would be reset partway through the second. If nothing recorded the first failure,
+the next boot would repeat it indefinitely. The bootloader must therefore bound 
 the work between watchdog refreshes. Peak Mbed TLS heap use was 4948 bytes.
+
+**Signed image layout.** Verified 2026-09-30. Both slots hold images from
+`tools/imgtool.py sign`: a 512-byte header at the slot base, the program
+linked at slot + 0x200, and the signature trailer after it. The bootloader
+sets VTOR to 0x08010200 or 0x08040200, read back over SWD, and the slot B
+trial and rollback sequence produced the same records as with unsigned
+images. The bootloader does not yet read the header.
 
 ## Do not do these
 
@@ -154,7 +161,7 @@ Populated as milestones complete. See `docs/RESULTS.md` for the full table.
 
 | Measurement | Value | Date |
 |-------------|-------|------|
-| Bootloader size | 2604 B text, 4 B bss (slot selection, watchdog, reset cause; no crypto yet) | 2026-09-28 |
+| Bootloader size | 2612 B text, 4 B bss (slot selection, watchdog, reset cause, image header offset; no crypto yet) | 2026-09-30 |
 | Mbed TLS verify path | about 15.6 KB code (ECP, bignum, curve data, SHA-256, allocator) | 2026-09-30 |
 | Cold boot to application | | |
 | SHA-256 over a full slot | 901 ms at 16 MHz (14.41 M cycles, 73 cycles/byte), `MBEDTLS_SHA256_SMALLER` | 2026-09-30 |
