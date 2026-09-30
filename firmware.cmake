@@ -106,3 +106,40 @@ add_firmware(crypto_bench bootloader/bootloader.ld
     bench/crypto_bench.c
 )
 target_link_libraries(crypto_bench PRIVATE boot_crypto)
+
+# ---- Image signing ----
+#
+# Each application binary is wrapped by tools/imgtool.py into a signed image:
+# header, payload, trailer. The image, not the raw binary, is what gets flashed 
+# at the slot base. Signing needs the private key, which exists only on the 
+# development machine. Without it the build still succeeds and simply produces no images.
+set(SIGNING_KEY ${CMAKE_SOURCE_DIR}/keys/dev_private.pem CACHE FILEPATH
+    "Private key used to sign application images")
+
+if(EXISTS ${CMAKE_SOURCE_DIR}/.venv/bin/python)
+    set(IMGTOOL_PYTHON_DEFAULT ${CMAKE_SOURCE_DIR}/.venv/bin/python)
+else()
+    set(IMGTOOL_PYTHON_DEFAULT python3)
+endif()
+set(IMGTOOL_PYTHON ${IMGTOOL_PYTHON_DEFAULT} CACHE STRING
+    "Python interpreter with tools/requirements.txt installed")
+
+# Runs after the .bin is produced: POST_BUILD commands on one target run in
+# the order they were added, and add_firmware adds the objcopy step first.
+function(add_signed_image target load_addr)
+    if(NOT EXISTS ${SIGNING_KEY})
+        message(STATUS "${target}: no key at ${SIGNING_KEY}, image not signed")
+        return()
+    endif()
+    add_custom_command(TARGET ${target} POST_BUILD
+        COMMAND ${IMGTOOL_PYTHON} ${CMAKE_SOURCE_DIR}/tools/imgtool.py sign
+            --key ${SIGNING_KEY}
+            --in ${target}.bin
+            --out ${target}.img
+            --load-addr ${load_addr}
+        COMMENT "Signing ${target}.img"
+    )
+endfunction()
+
+add_signed_image(app_slot_a 0x08010000)
+add_signed_image(app_slot_b 0x08040000)

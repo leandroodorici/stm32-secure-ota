@@ -17,14 +17,10 @@
 #define BOOT_STATE_PAGE_B 0x0800F800u
 
 // The application's vector table is not at the slot base. The first 512 bytes
-// are reserved for the image header, so the table starts at +0x200. The offset
-// is not arbitrary: VTOR requires the vector table to be aligned to a power of
-// 2 at least as large as the table itself. G474's table needs 512-byte alignment.
-//
-// TODO(M2): restore to 0x200 once imgtool prepends a real header. Until then
-// the application's vector table sits at the slot base, so the offset is 0 to
-// keep the bootloader and the linker script in agreement.
-#define APP_VECTOR_OFFSET 0u
+// hold the image header, so the table starts at +0x200. The offset is not
+// arbitrary: VTOR requires the vector table to be aligned to a power of 2 at
+// least as large as the table itself, and the G474's table needs 512 bytes.
+#define APP_VECTOR_OFFSET 0x200u
 
 // SRAM1 + SRAM2, contiguous from 0x20000000. Used to sanity-check the stack
 // pointer we are about to install.
