@@ -107,3 +107,30 @@ endfunction()
 
 add_signed_image(app_slot_a 0x08010000)
 add_signed_image(app_slot_b 0x08040000)
+
+# ---- Bootloader verification ----
+#
+# The bootloader trusts exactly one key. Its public half is converted to C 
+# from the .pem at build time, so the key file stays the single source of 
+# truth and nothing generated is committed. A bootloader without a key could 
+# never boot anything, so its absence stops the build.
+set(BOOT_PUBKEY ${CMAKE_SOURCE_DIR}/keys/dev_public.pem CACHE FILEPATH
+    "Public key the bootloader verifies images against")
+if(NOT EXISTS ${BOOT_PUBKEY})
+    message(FATAL_ERROR "No public key at ${BOOT_PUBKEY}. Generate a key pair "
+        "with: .venv/bin/python tools/imgtool.py keygen")
+endif()
+
+add_custom_command(
+    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/boot_pubkey.c
+    COMMAND ${IMGTOOL_PYTHON} ${IMGTOOL} pubkey-c
+        --key ${BOOT_PUBKEY} --out ${CMAKE_CURRENT_BINARY_DIR}/boot_pubkey.c
+    DEPENDS ${BOOT_PUBKEY} ${IMGTOOL}
+    COMMENT "Embedding public key from ${BOOT_PUBKEY}"
+)
+
+target_sources(bootloader PRIVATE
+    common/image_verify.c
+    ${CMAKE_CURRENT_BINARY_DIR}/boot_pubkey.c
+)
+target_link_libraries(bootloader PRIVATE boot_crypto)

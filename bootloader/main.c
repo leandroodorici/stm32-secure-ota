@@ -3,6 +3,7 @@
 #include "boot_handoff.h"
 #include "boot_record.h"
 #include "flash_stm32.h"
+#include "image_verify.h"
 
 // Slot and boot state addresses, from the flash map in docs/DESIGN.md
 // section 4. Slot A is in bank 1 and slot B in bank 2, so the update agent
@@ -45,9 +46,10 @@
 #define IWDG_KEY_UNLOCK 0x5555u
 #define IWDG_KEY_REFRESH 0xAAAAu
 
-// 32 kHz / 128 = 250 Hz, and 1000 ticks at 250 Hz is 4 s. It has to
-// cover worst-case verification plus application startup; revisit
-// once M2 measures signature verification.
+// 32 kHz / 128 = 250 Hz, and 1000 ticks at 250 Hz is 4 s, or at least 3.76 s
+// given the LSI tolerance. One worst-case verification takes 2.6 s at the
+// reset clock: that fits one period but not two, so the watchdog is refreshed
+// before each verification rather than once per boot.
 #define IWDG_PR_DIV128 5u
 #define IWDG_RELOAD 999u
 
@@ -92,24 +94,25 @@ static uint32_t slot_base(uint8_t slot) {
     return (slot == 0u) ? SLOT_A_BASE : SLOT_B_BASE;
 }
 
-// Everything a real verification will eventually do lives here. For now it is
-// only the two structural checks from section 7: the stack pointer must land in
-// SRAM and the reset vector must point inside the slot with its Thumb bit set.
-static int slot_is_bootable(uint8_t slot) {
-    uint32_t base = slot_base(slot);
+// The bootloader trusts exactly one public key, embedded at build time from
+// keys/dev_public.pem by "imgtool.py pubkey-c"
+extern const uint8_t boot_pubkey[IMG_PUBKEY_LEN];
+
+// The vector table checks from section 7. They run after verification and
+// catch an image that is authentic but not linked for this layout: the stack
+// pointer must land in SRAM, and the reset vector must point inside the slot
+// with its Thumb bit set.
+static int vectors_look_valid(uint32_t base) {
     const uint32_t *vt = (const uint32_t *)(base + APP_VECTOR_OFFSET);
     uint32_t sp = vt[0];
     uint32_t pc = vt[1];
 
-    // The stack pointer must land inside SRAM. A slot that was never
-    // programmed reads as 0xFFFFFFFF and fails here.
     if (sp < SRAM_BASE || sp > (SRAM_BASE + SRAM_SIZE)) {
         return 0;
     }
-
-    // The reset vector must point inside the slot, with bit 0 set. The
-    // Cortex-M only executes Thumb code, and it signals that by setting the
-    // low bit of every function pointer. A cleared bit would fault instantly.
+    // The Cortex-M only executes Thumb code, and it signals that by setting
+    // the low bit of every function pointer. A cleared bit would fault
+    // instantly.
     if ((pc & 1u) == 0u) {
         return 0;
     }
@@ -117,6 +120,20 @@ static int slot_is_bootable(uint8_t slot) {
         return 0;
     }
     return 1;
+}
+
+// Full check of one slot: signature verification against the rollback floor,
+// then the vector table. The watchdog is refreshed first, so every
+// verification gets a full period. A hang inside one still ends in a reset.
+static br_result_t check_slot(const flash_if_t *flash, uint8_t slot, uint32_t floor) {
+    IWDG_KR = IWDG_KEY_REFRESH;
+
+    uint32_t base = slot_base(slot);
+    br_result_t result = image_verify(flash, base, SLOT_SIZE, boot_pubkey, floor, NULL);
+    if (result == BR_RESULT_OK && !vectors_look_valid(base)) {
+        result = BR_RESULT_BAD_HEADER;
+    }
+    return result;
 }
 
 static void jump_to_app(uint32_t vector_addr) {
@@ -179,9 +196,9 @@ int main(void) {
 
     boot_record_t rec;
     if (!boot_record_load(&ctx, &rec)) {
-        // Factory path: no valid record exists. If slot A holds something
-        // bootable, adopt it and write the first record.
-        if (!slot_is_bootable(0)) {
+        // Factory path: no valid record exists. If slot A holds a valid
+        // image, adopt it and write the first record.
+        if (check_slot(&flash, 0, 0) != BR_RESULT_OK) {
             for (;;) {
             }
         }
@@ -216,9 +233,12 @@ int main(void) {
         if (state == SLOT_TRIAL && rec.trial_attempts >= BR_MAX_TRIALS) {
             reject = 1;
             reason = BR_RESULT_NOT_CONFIRMED;
-        } else if (!slot_is_bootable(s)) {
-            reject = 1;
-            reason = BR_RESULT_BAD_HEADER;
+        } else {
+            br_result_t result = check_slot(&flash, s, rec.security_floor);
+            if (result != BR_RESULT_OK) {
+                reject = 1;
+                reason = result;
+            }
         }
 
         boot_record_t next = rec;
@@ -246,22 +266,36 @@ int main(void) {
     // Normal path. A confirmed primary that checks out is booted with no
     // flash write at all, which matters for wear and energy on a device that
     // reboots often.
-    if (rec.slot_state[primary] == SLOT_CONFIRMED && slot_is_bootable(primary)) {
-        jump_to_app(slot_base(primary) + APP_VECTOR_OFFSET);
+    br_result_t primary_result = BR_RESULT_NONE;
+    if (rec.slot_state[primary] == SLOT_CONFIRMED) {
+        primary_result = check_slot(&flash, primary, rec.security_floor);
+        if (primary_result == BR_RESULT_OK) {
+            jump_to_app(slot_base(primary) + APP_VECTOR_OFFSET);
+        }
     }
 
-    // Fall back to the other slot, recording the switch
-    if (rec.slot_state[other] == SLOT_CONFIRMED && slot_is_bootable(other)) {
+    // Fall back to the other slot, recording the switch. A confirmed primary
+    // that no longer verifies is marked REJECTED in the same record, with the
+    // reason, so later boots do not spend a verification on it.
+    if (rec.slot_state[other] == SLOT_CONFIRMED &&
+        check_slot(&flash, other, rec.security_floor) == BR_RESULT_OK) {
         boot_record_t next = rec;
         next.primary_slot = other;
         next.last_result = BR_RESULT_OK;
+        if (primary_result != BR_RESULT_NONE) {
+            next.slot_state[primary] = SLOT_REJECTED;
+            next.last_result = primary_result;
+        }
         (void)boot_record_append(&ctx, &next);
         jump_to_app(slot_base(other) + APP_VECTOR_OFFSET);
     }
 
     // Nothing bootable. Section 7 calls for a halt with an error indication;
     // recovery is over SWD by design, since a recovery mode would mean
-    // transport code in the bootloader.
+    // transport code in the bootloader. Nothing is recorded: the watchdog is
+    // no longer refreshed, so the part resets and checks again, and a failure
+    // with a transient cause gets another chance instead of a permanent
+    // rejection of the only image.
     for (;;) {
     }
 }
