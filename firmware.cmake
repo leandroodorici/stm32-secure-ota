@@ -68,37 +68,7 @@ target_include_directories(app_slot_b PRIVATE
     ${CMAKE_SOURCE_DIR}/common/include
 )
 
-# ---- Mbed TLS verify path ----
-#
-# Pinned 3.6 LTS submodule. Only the sources the verify path needs are built,
-# against bootloader/boot_crypto_config.h, which replaces the library's default
-# configuration. Third-party code is built without the project's warning
-# flags, and its headers are included as system headers so that code which
-# includes them still builds with -Werror.
-set(MBEDTLS_DIR ${CMAKE_SOURCE_DIR}/third_party/mbedtls)
-
-add_library(boot_crypto STATIC
-    ${MBEDTLS_DIR}/library/asn1parse.c
-    ${MBEDTLS_DIR}/library/asn1write.c
-    ${MBEDTLS_DIR}/library/bignum.c
-    ${MBEDTLS_DIR}/library/bignum_core.c
-    ${MBEDTLS_DIR}/library/constant_time.c
-    ${MBEDTLS_DIR}/library/ecdsa.c
-    ${MBEDTLS_DIR}/library/ecp.c
-    ${MBEDTLS_DIR}/library/ecp_curves.c
-    ${MBEDTLS_DIR}/library/memory_buffer_alloc.c
-    ${MBEDTLS_DIR}/library/platform.c
-    ${MBEDTLS_DIR}/library/platform_util.c
-    ${MBEDTLS_DIR}/library/sha256.c
-)
-target_include_directories(boot_crypto SYSTEM PUBLIC
-    ${MBEDTLS_DIR}/include
-    ${CMAKE_SOURCE_DIR}/bootloader
-)
-target_compile_definitions(boot_crypto PUBLIC
-    MBEDTLS_CONFIG_FILE="boot_crypto_config.h"
-)
-target_compile_options(boot_crypto PRIVATE -w)
+include(${CMAKE_SOURCE_DIR}/cmake/boot_crypto.cmake)
 
 # Runs from 0x08000000 in place of the bootloader
 add_firmware(crypto_bench bootloader/bootloader.ld
@@ -116,13 +86,7 @@ target_link_libraries(crypto_bench PRIVATE boot_crypto)
 set(SIGNING_KEY ${CMAKE_SOURCE_DIR}/keys/dev_private.pem CACHE FILEPATH
     "Private key used to sign application images")
 
-if(EXISTS ${CMAKE_SOURCE_DIR}/.venv/bin/python)
-    set(IMGTOOL_PYTHON_DEFAULT ${CMAKE_SOURCE_DIR}/.venv/bin/python)
-else()
-    set(IMGTOOL_PYTHON_DEFAULT python3)
-endif()
-set(IMGTOOL_PYTHON ${IMGTOOL_PYTHON_DEFAULT} CACHE STRING
-    "Python interpreter with tools/requirements.txt installed")
+include(${CMAKE_SOURCE_DIR}/cmake/imgtool.cmake)
 
 # Runs after the .bin is produced: POST_BUILD commands on one target run in
 # the order they were added, and add_firmware adds the objcopy step first.
@@ -132,7 +96,7 @@ function(add_signed_image target load_addr)
         return()
     endif()
     add_custom_command(TARGET ${target} POST_BUILD
-        COMMAND ${IMGTOOL_PYTHON} ${CMAKE_SOURCE_DIR}/tools/imgtool.py sign
+        COMMAND ${IMGTOOL_PYTHON} ${IMGTOOL} sign
             --key ${SIGNING_KEY}
             --in ${target}.bin
             --out ${target}.img
