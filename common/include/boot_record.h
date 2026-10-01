@@ -46,7 +46,10 @@ typedef enum {
     BR_RESULT_WRONG_SLOT = 14,
     BR_RESULT_ROLLBACK_BLOCKED = 15,
     BR_RESULT_NOT_CONFIRMED = 16,
-    BR_RESULT_FLASH_ERROR = 17
+    BR_RESULT_FLASH_ERROR = 17,
+    // The crypto library failed for a reason other than a bad signature: a
+    // fault in this device's own build, never a property of the image
+    BR_RESULT_CRYPTO_ERROR = 18
 } br_result_t;
 
 typedef struct {
