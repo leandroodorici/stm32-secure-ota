@@ -225,8 +225,12 @@ reset
       otherwise                 -> increment attempts, mark TRIAL, write, jump
 
   if the primary slot is CONFIRMED and verifies  -> jump, writing nothing
-  if the other slot is CONFIRMED and verifies    -> make it primary, write, jump
-  otherwise                                      -> halt with an error pattern
+  if the other slot is CONFIRMED and verifies    -> make it primary, mark a
+                                                    primary that failed
+                                                    verification REJECTED,
+                                                    write, jump
+  otherwise                                      -> halt, writing nothing; the
+                                                    watchdog resets and retries
 ```
 
 A normal boot of a confirmed image performs no flash writes at all. On a device
@@ -242,8 +246,11 @@ but wasn't linked correctly.
 
 The watchdog is started before anything else so that a hang anywhere in the
 bootloader, including inside verification, still produces a reset the next boot
-can count. Its timeout must cover worst-case verification plus application
-startup.
+can count. Its timeout is at least 3.76 s, and one worst-case verification
+takes 2.6 s, so a boot that checks more than one slot would not fit in a single
+period. The watchdog is therefore refreshed before each verification, which
+bounds the work between refreshes to one verification while a hang inside
+any of them still resets the part.
 
 ## 8. Design decisions
 
@@ -507,17 +514,19 @@ manual and has not been observed directly. The simulator's behaviour depends on
 it. This is confirmed by interrupting a program operation deliberately and
 observing the resulting fault.
 
-Verification cost per boot has not been measured. The current design verifies
-fully on every boot at the reset clock. If that proves too slow, the bootloader
-can raise the clock for verification and restore the reset configuration before
-jumping. For a device that resets on every wake from low power, a different
-policy may be needed: full verification on power-on, brownout and watchdog
-resets, and a token in a backup register for wake-from-standby. That token can
-only be forged by code already executing on the device, at which point
-verification is irrelevant. The decision waits on measurement.
+Verification cost was measured at the reset clock: about 1.7 s for a small
+image and 2.6 s in the worst case, a full slot (docs/HARDWARE.md). Full
+verification on every boot at 16 MHz is kept for now. It fits the watchdog
+because the watchdog is refreshed before each verification. If boot time matters, 
+the bootloader can raise the clock for verification and restore the reset 
+configuration before jumping. Still open is the policy for a device that 
+resets on every wake from low power: full verification on power-on, brownout 
+and watchdog resets, and a token in a backup register for wake-from-standby. 
+That token can only be forged by code already executing on the device, at 
+which point verification is irrelevant.
 
-Whether 60 KB is the right bootloader reservation depends on the size of the
-Mbed TLS verification path, which is not yet known.
+The 60 KB bootloader reservation is ample. With the full verification path the
+bootloader is about 20 KB of code against a 32 KB budget (docs/HARDWARE.md).
 
 Bootloader behaviour when both slots fail verification is currently a halt with
 an error indication. Whether that is preferable to a minimal recovery mode is

@@ -161,7 +161,7 @@ Populated as milestones complete. See `docs/RESULTS.md` for the full table.
 
 | Measurement | Value | Date |
 |-------------|-------|------|
-| Bootloader size | 2612 B text, 4 B bss (slot selection, watchdog, reset cause, image header offset; no crypto yet) | 2026-09-30 |
+| Bootloader size | 20176 B text, 8 B data, 6488 B bss (full image verification; 6 KB of bss is the Mbed TLS buffer) | 2026-10-01 |
 | Mbed TLS verify path | about 15.6 KB code (ECP, bignum, curve data, SHA-256, allocator) | 2026-09-30 |
 | Cold boot to application | | |
 | SHA-256 over a full slot | 901 ms at 16 MHz (14.41 M cycles, 73 cycles/byte), `MBEDTLS_SHA256_SMALLER` | 2026-09-30 |
