@@ -145,6 +145,23 @@ sets VTOR to 0x08010200 or 0x08040200, read back over SWD, and the slot B
 trial and rollback sequence produced the same records as with unsigned
 images. The bootloader does not yet read the header.
 
+**Verification before every jump.** Verified 2026-10-01. The bootloader runs
+the full check from DESIGN.md section 5 before every jump. A confirmed slot A
+booted after a visible pause of about 1.7 s (the ECDSA verify at 16 MHz) and
+still wrote no record. A valid slot B marked PENDING passed verification and
+entered TRIAL. Slot A's image, correctly signed but linked for slot A, was
+then written into slot B. The next boot rejected it with reason 14
+(WRONG_SLOT) and returned to slot A.
+
+**Negative tests on target.** Verified 2026-10-02 with
+`tools/hw_negative_test.py`. Each of the 13 images from `imgtool.py gen-bad`,
+built for slot B and signed with the development key, was written into slot B
+and marked PENDING over SWD, with a security floor of 5. Every bad image was
+rejected with the reason the host test expects: BAD_MAGIC, BAD_HEADER (four
+variants), BAD_HASH, BAD_SIGNATURE (four variants), WRONG_SLOT and
+ROLLBACK_BLOCKED. The board came back up on slot A each time. The good image
+entered TRIAL and ran from slot B.
+
 ## Do not do these
 
 **RDP level 2** on the G474. Irreversible, and there is one board.

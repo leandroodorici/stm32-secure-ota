@@ -2,7 +2,7 @@
 
 **Owner:** Leandro Odorici  
 **Status**: draft, implementation in progress  
-**Last updated**: 2026-09-14  
+**Last updated**: 2026-10-02  
 **Target**: STM32G474RE (node), ESP32-S3 (gateway)
 
 ## 1. Scope
@@ -495,6 +495,12 @@ Negative tests cover tampered payloads and headers, wrong keys, corrupt
 digests, truncated and oversized images, malformed TLVs, images linked for the
 wrong slot, and downgrades. Each must be rejected with the correct reason code.
 A bootloader that rejects a tampered image as malformed is hiding a bug.
+
+The negative tests run at two levels. On the host, the C verifier must give the
+same reason as `tools/imgtool.py` for every image in a generated set
+(`tests/host/test_image_verify.c`), so the two verifiers cannot drift apart.
+On the board, `tools/hw_negative_test.py` writes each image into slot B, marks
+it PENDING, resets, and checks the reason the bootloader records.
 
 On hardware, the update path is exercised repeatedly with a reset asserted at a
 random point in each cycle, with the outcome logged per cycle.
