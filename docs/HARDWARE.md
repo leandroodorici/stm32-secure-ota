@@ -174,7 +174,7 @@ before doing it with firmware on the chip.
 
 ## Measurements
 
-Populated as milestones complete. See `docs/RESULTS.md` for the full table.
+Populated as milestones complete
 
 | Measurement | Value | Date |
 |-------------|-------|------|
