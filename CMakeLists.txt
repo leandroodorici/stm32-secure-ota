@@ -1,4 +1,18 @@
 cmake_minimum_required(VERSION 3.16)
+
+# Two build modes from one tree, selected by whether a toolchain file was
+# passed. Firmware targets need a different compiler, different flags and a
+# linker script, and CMake fixes the compiler once per build tree, so they
+# cannot share a configuration.
+#
+#   host:     cmake -S . -B build
+#   firmware: cmake -S . -B build-fw -DCMAKE_TOOLCHAIN_FILE=cmake/arm-none-eabi.cmake
+
+if(CMAKE_TOOLCHAIN_FILE)
+    include(${CMAKE_CURRENT_SOURCE_DIR}/firmware.cmake)
+    return()
+endif()
+
 project(stm32_secure_ota_host C)
 
 # This project builds ONLY the host-testable core. Firmware targets
