@@ -293,16 +293,22 @@ def cmd_gen_bad(args):
     with open(args.infile, "rb") as f:
         payload = f.read()
     os.makedirs(args.outdir, exist_ok=True)
-    slot_a, slot_b, v = 0x08010000, 0x08040000, parse_version("1.0.0")
+    target = int(args.load_addr, 0)
+    if target not in SLOTS:
+        sys.exit(f"{target:#010x} is not a slot base")
+    # The wrong_slot image is valid in every way except that it was built for
+    # the slot it is not going to occupy
+    other = next(base for base in SLOTS if base != target)
+    v = parse_version("1.0.0")
 
-    images = [("good", make_image(priv, payload, slot_a, v, 1, 5), "OK")]
+    images = [("good", make_image(priv, payload, target, v, 1, 5), "OK")]
     for name, expect in BAD:
-        images.append((name, make_image(priv, payload, slot_a, v, 1, 5, name), expect))
+        images.append((name, make_image(priv, payload, target, v, 1, 5, name), expect))
     # These two are validly signed. They are POLICY violations, enforced by
     # the bootloader against device state, not cryptographic ones.
-    images.append(("wrong_slot", make_image(priv, payload, slot_b, v, 1, 5),
+    images.append(("wrong_slot", make_image(priv, payload, other, v, 1, 5),
                    "WRONG_SLOT (policy)"))
-    images.append(("downgrade", make_image(priv, payload, slot_a, v, 1, 1),
+    images.append(("downgrade", make_image(priv, payload, target, v, 1, 1),
                    "ROLLBACK_BLOCKED (policy)"))
 
     with open(os.path.join(args.outdir, "EXPECTATIONS.txt"), "w") as manifest:
@@ -352,6 +358,8 @@ def main():
     p.add_argument("--key", required=True)
     p.add_argument("--in", dest="infile", required=True)
     p.add_argument("--outdir", default="tests/images")
+    p.add_argument("--load-addr", default="0x08010000",
+                    help="slot base the images are built for")
     p.set_defaults(func=cmd_gen_bad)
 
     args = ap.parse_args()
