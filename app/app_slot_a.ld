@@ -8,7 +8,10 @@
 
 MEMORY
 {
-    FLASH (rx)  : ORIGIN = 0x08010000, LENGTH = 192K
+    /* The slot starts with the 512-byte image header written by
+     * tools/imgtool.py, so the program itself starts 0x200 in. The last
+     * 256 bytes are left for the signature trailer. */
+    FLASH (rx)  : ORIGIN = 0x08010000 + 0x200, LENGTH = 192K - 0x200 - 0x100
     /* The first 32 bytes of SRAM hold the boot handoff from
      * common/include/boot_handoff.h. Starting RAM after it means startup
      * never zeroes it and no variable is placed on top of it. */

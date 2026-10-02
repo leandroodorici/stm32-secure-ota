@@ -128,6 +128,40 @@ intervention, and the rollback followed. The PENDING record in that run
 deliberately carried a stale attempt count of 3. The bootloader restarted
 it at 1, so the image received its full three attempts.
 
+**Cost of verification at the reset clock.** Measured 2026-09-30 with
+`bench/crypto_bench.c` flashed in place of the bootloader, timed with the
+DWT cycle counter at 16 MHz. A worst-case verification (full-slot SHA-256
+plus one ECDSA P-256 verify) takes 2.6 s. This fits one watchdog period,
+whose shortest value is 3.76 s given the LSI tolerance, but two verifications 
+in one boot do not. A boot that rejects one slot and then verifies the other 
+would be reset partway through the second. If nothing recorded the first failure,
+the next boot would repeat it indefinitely. The bootloader must therefore bound 
+the work between watchdog refreshes. Peak Mbed TLS heap use was 4948 bytes.
+
+**Signed image layout.** Verified 2026-09-30. Both slots hold images from
+`tools/imgtool.py sign`: a 512-byte header at the slot base, the program
+linked at slot + 0x200, and the signature trailer after it. The bootloader
+sets VTOR to 0x08010200 or 0x08040200, read back over SWD, and the slot B
+trial and rollback sequence produced the same records as with unsigned
+images. The bootloader does not yet read the header.
+
+**Verification before every jump.** Verified 2026-10-01. The bootloader runs
+the full check from DESIGN.md section 5 before every jump. A confirmed slot A
+booted after a visible pause of about 1.7 s (the ECDSA verify at 16 MHz) and
+still wrote no record. A valid slot B marked PENDING passed verification and
+entered TRIAL. Slot A's image, correctly signed but linked for slot A, was
+then written into slot B. The next boot rejected it with reason 14
+(WRONG_SLOT) and returned to slot A.
+
+**Negative tests on target.** Verified 2026-10-02 with
+`tools/hw_negative_test.py`. Each of the 13 images from `imgtool.py gen-bad`,
+built for slot B and signed with the development key, was written into slot B
+and marked PENDING over SWD, with a security floor of 5. Every bad image was
+rejected with the reason the host test expects: BAD_MAGIC, BAD_HEADER (four
+variants), BAD_HASH, BAD_SIGNATURE (four variants), WRONG_SLOT and
+ROLLBACK_BLOCKED. The board came back up on slot A each time. The good image
+entered TRIAL and ran from slot B.
+
 ## Do not do these
 
 **RDP level 2** on the G474. Irreversible, and there is one board.
@@ -140,12 +174,13 @@ before doing it with firmware on the chip.
 
 ## Measurements
 
-Populated as milestones complete. See `docs/RESULTS.md` for the full table.
+Populated as milestones complete
 
 | Measurement | Value | Date |
 |-------------|-------|------|
-| Bootloader size | 2604 B text, 4 B bss (slot selection, watchdog, reset cause; no crypto yet) | 2026-09-28 |
+| Bootloader size | 20176 B text, 8 B data, 6488 B bss (full image verification; 6 KB of bss is the Mbed TLS buffer) | 2026-10-01 |
+| Mbed TLS verify path | about 15.6 KB code (ECP, bignum, curve data, SHA-256, allocator) | 2026-09-30 |
 | Cold boot to application | | |
-| SHA-256 over a full slot | | |
-| ECDSA P-256 verify | | |
+| SHA-256 over a full slot | 901 ms at 16 MHz (14.41 M cycles, 73 cycles/byte), `MBEDTLS_SHA256_SMALLER` | 2026-09-30 |
+| ECDSA P-256 verify | 1707 ms at 16 MHz (27.30 M cycles), curve load included; 4948 B peak heap | 2026-09-30 |
 | CAN throughput at 500 kbit/s | | |

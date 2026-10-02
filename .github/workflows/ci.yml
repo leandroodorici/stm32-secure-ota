@@ -59,6 +59,9 @@ jobs:
           - { compiler: gcc,   sanitizers: "OFF" }
     steps:
       - uses: actions/checkout@v5
+        with:
+          # Fetches Mbed TLS
+          submodules: true
       - name: Install toolchain
         run: |
           sudo apt-get update
@@ -66,6 +69,14 @@ jobs:
           if [ "${{ matrix.compiler }}" = "clang" ]; then
             sudo apt-get install -y clang
           fi
+          
+      # The build runs tools/imgtool.py to generate a throwaway key and the
+      # test image set, so it needs the pinned Python dependencies
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Python dependencies
+        run: pip install -r tools/requirements.txt
 
       - name: Configure
         run: |

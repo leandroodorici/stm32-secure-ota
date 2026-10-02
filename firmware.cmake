@@ -58,7 +58,7 @@ target_include_directories(app_slot_a PRIVATE
 )
 
 # Same sources as slot A, linked for bank 2. The two images are identical
-# apart from their addresses, per the A/B design in section 8.2.
+# apart from their addresses, per the A/B design.
 add_firmware(app_slot_b app/app_slot_b.ld
     app/startup.c
     app/main.c
@@ -67,3 +67,70 @@ add_firmware(app_slot_b app/app_slot_b.ld
 target_include_directories(app_slot_b PRIVATE
     ${CMAKE_SOURCE_DIR}/common/include
 )
+
+include(${CMAKE_SOURCE_DIR}/cmake/boot_crypto.cmake)
+
+# Runs from 0x08000000 in place of the bootloader
+add_firmware(crypto_bench bootloader/bootloader.ld
+    bootloader/startup.c
+    bench/crypto_bench.c
+)
+target_link_libraries(crypto_bench PRIVATE boot_crypto)
+
+# ---- Image signing ----
+#
+# Each application binary is wrapped by tools/imgtool.py into a signed image:
+# header, payload, trailer. The image, not the raw binary, is what gets flashed 
+# at the slot base. Signing needs the private key, which exists only on the 
+# development machine. Without it the build still succeeds and simply produces no images.
+set(SIGNING_KEY ${CMAKE_SOURCE_DIR}/keys/dev_private.pem CACHE FILEPATH
+    "Private key used to sign application images")
+
+include(${CMAKE_SOURCE_DIR}/cmake/imgtool.cmake)
+
+# Runs after the .bin is produced: POST_BUILD commands on one target run in
+# the order they were added, and add_firmware adds the objcopy step first.
+function(add_signed_image target load_addr)
+    if(NOT EXISTS ${SIGNING_KEY})
+        message(STATUS "${target}: no key at ${SIGNING_KEY}, image not signed")
+        return()
+    endif()
+    add_custom_command(TARGET ${target} POST_BUILD
+        COMMAND ${IMGTOOL_PYTHON} ${IMGTOOL} sign
+            --key ${SIGNING_KEY}
+            --in ${target}.bin
+            --out ${target}.img
+            --load-addr ${load_addr}
+        COMMENT "Signing ${target}.img"
+    )
+endfunction()
+
+add_signed_image(app_slot_a 0x08010000)
+add_signed_image(app_slot_b 0x08040000)
+
+# ---- Bootloader verification ----
+#
+# The bootloader trusts exactly one key. Its public half is converted to C 
+# from the .pem at build time, so the key file stays the single source of 
+# truth and nothing generated is committed. A bootloader without a key could 
+# never boot anything, so its absence stops the build.
+set(BOOT_PUBKEY ${CMAKE_SOURCE_DIR}/keys/dev_public.pem CACHE FILEPATH
+    "Public key the bootloader verifies images against")
+if(NOT EXISTS ${BOOT_PUBKEY})
+    message(FATAL_ERROR "No public key at ${BOOT_PUBKEY}. Generate a key pair "
+        "with: .venv/bin/python tools/imgtool.py keygen")
+endif()
+
+add_custom_command(
+    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/boot_pubkey.c
+    COMMAND ${IMGTOOL_PYTHON} ${IMGTOOL} pubkey-c
+        --key ${BOOT_PUBKEY} --out ${CMAKE_CURRENT_BINARY_DIR}/boot_pubkey.c
+    DEPENDS ${BOOT_PUBKEY} ${IMGTOOL}
+    COMMENT "Embedding public key from ${BOOT_PUBKEY}"
+)
+
+target_sources(bootloader PRIVATE
+    common/image_verify.c
+    ${CMAKE_CURRENT_BINARY_DIR}/boot_pubkey.c
+)
+target_link_libraries(bootloader PRIVATE boot_crypto)

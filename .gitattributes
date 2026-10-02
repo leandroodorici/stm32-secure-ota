@@ -1,0 +1,7 @@
+# Text files are stored with LF line endings
+* text=auto eol=lf
+
+# Build outputs and images are never text
+*.bin binary
+*.img binary
+*.elf binary
