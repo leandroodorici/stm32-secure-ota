@@ -12,6 +12,10 @@ add_compile_options(
     -Os                # size matters: the bootloader region cannot grow later
     -g3                # debug info costs nothing in flash, it is not loaded
     -fno-common
+    # __FILE__ in assertions records paths relative to the repository, so the
+    # firmware, and the hash it is signed over, does not depend on where the
+    # tree was checked out
+    -fmacro-prefix-map=${CMAKE_SOURCE_DIR}/=
 )
 
 # Builds one firmware image: ELF for debugging, plus a raw binary for the
@@ -48,25 +52,50 @@ target_include_directories(bootloader PRIVATE
     ${CMAKE_SOURCE_DIR}/bootloader
 )
 
-add_firmware(app_slot_a app/app_slot_a.ld
+# ---- FreeRTOS kernel ----
+#
+# Only the application uses it. The bootloader has no RTOS.
+# Built from the core sources and the GCC Cortex-M4F port against
+# app/FreeRTOSConfig.h. Like Mbed TLS, it is third-party code: built without
+# the project's warning flags, its headers included as system headers.
+set(FREERTOS_DIR ${CMAKE_SOURCE_DIR}/third_party/freertos)
+
+if(NOT EXISTS ${FREERTOS_DIR}/tasks.c)
+    message(FATAL_ERROR "FreeRTOS is missing. Run: "
+        "git submodule update --init third_party/freertos")
+endif()
+
+add_library(freertos_kernel STATIC
+    ${FREERTOS_DIR}/list.c
+    ${FREERTOS_DIR}/queue.c
+    ${FREERTOS_DIR}/tasks.c
+    ${FREERTOS_DIR}/portable/GCC/ARM_CM4F/port.c
+)
+target_include_directories(freertos_kernel SYSTEM PUBLIC
+    ${FREERTOS_DIR}/include
+    ${FREERTOS_DIR}/portable/GCC/ARM_CM4F
+    ${CMAKE_SOURCE_DIR}/app
+)
+target_compile_options(freertos_kernel PRIVATE -w)
+
+# ---- Application ----
+#
+# Linked once per slot. Both images come from the same sources
+# and differ only in their linker script.
+set(APP_SOURCES
     app/startup.c
     app/main.c
+    app/supervisor.c
 )
 
-target_include_directories(app_slot_a PRIVATE
-    ${CMAKE_SOURCE_DIR}/common/include
-)
-
-# Same sources as slot A, linked for bank 2. The two images are identical
-# apart from their addresses, per the A/B design.
-add_firmware(app_slot_b app/app_slot_b.ld
-    app/startup.c
-    app/main.c
-)
-
-target_include_directories(app_slot_b PRIVATE
-    ${CMAKE_SOURCE_DIR}/common/include
-)
+foreach(slot a b)
+    add_firmware(app_slot_${slot} app/app_slot_${slot}.ld ${APP_SOURCES})
+    target_include_directories(app_slot_${slot} PRIVATE
+        ${CMAKE_SOURCE_DIR}/common/include
+        ${CMAKE_SOURCE_DIR}/app
+    )
+    target_link_libraries(app_slot_${slot} PRIVATE freertos_kernel)
+endforeach()
 
 include(${CMAKE_SOURCE_DIR}/cmake/boot_crypto.cmake)
 

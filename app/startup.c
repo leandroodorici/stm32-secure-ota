@@ -9,7 +9,17 @@ extern uint32_t _sbss, _ebss;
 
 int main(void);
 
+// Coprocessor access control: CP10 and CP11 are the FPU
+#define SCB_CPACR (*(volatile uint32_t *)0xE000ED88u)
+#define CPACR_CP10_CP11_FULL (0xFu << 20)
+
 void Reset_Handler(void) {
+    // The application is built for the hardware FPU, and the FreeRTOS port
+    // saves FPU registers on every context switch. Enable the FPU before any
+    // code can use it, and let the change take effect before continuing.
+    SCB_CPACR |= CPACR_CP10_CP11_FULL;
+    __asm volatile("dsb" ::: "memory");
+    __asm volatile("isb" ::: "memory");
     // Copy initialised globals from flash to RAM. Before this runs, any
     // global with a non-zero initialiser holds garbage.
     uint32_t *src = &_sidata;
