@@ -162,6 +162,15 @@ variants), BAD_HASH, BAD_SIGNATURE (four variants), WRONG_SLOT and
 ROLLBACK_BLOCKED. The board came back up on slot A each time. The good image
 entered TRIAL and ran from slot B.
 
+**FreeRTOS and watchdog supervision.** Verified 2026-10-05. The application
+runs FreeRTOS V11.3.1 with static allocation only. The kernel tick advanced
+by about 1000 per second, measured by reading `xTickCount` over SWD, and a
+halt landed in the idle task on the process stack. The watchdog is fed only
+by a supervisor task, and only when every registered task has reported a
+heartbeat. With the blinker's heartbeat removed but the task still running, 
+the part reset after about 4 s with reset cause `0x24000000` (IWDG + PIN). 
+With it restored, the application ran indefinitely.
+
 ## Do not do these
 
 **RDP level 2** on the G474. Irreversible, and there is one board.
@@ -179,6 +188,7 @@ Populated as milestones complete
 | Measurement | Value | Date |
 |-------------|-------|------|
 | Bootloader size | 20176 B text, 8 B data, 6488 B bss (full image verification; 6 KB of bss is the Mbed TLS buffer) | 2026-10-01 |
+| Application size | 4020 B text, 1988 B bss (FreeRTOS kernel, supervisor, blinker; all memory static) | 2026-10-05 |
 | Mbed TLS verify path | about 15.6 KB code (ECP, bignum, curve data, SHA-256, allocator) | 2026-09-30 |
 | Cold boot to application | | |
 | SHA-256 over a full slot | 901 ms at 16 MHz (14.41 M cycles, 73 cycles/byte), `MBEDTLS_SHA256_SMALLER` | 2026-09-30 |
