@@ -84,8 +84,9 @@ the signature trailer.
 ## Repository layout
 
 ```
-bootloader/   bootloader: boot flow, flash driver, Mbed TLS configuration
-app/          application and its slot A / slot B linker scripts
+bootloader/   bootloader: boot flow, Mbed TLS configuration
+drivers/      STM32G4 flash controller driver, shared by bootloader and app
+app/          FreeRTOS application and its slot A / slot B linker scripts
 common/       hardware-independent core shared by bootloader and host tests:
               boot records and image verification
 tests/host/   host test suite: flash simulator, boot records, power-fail
@@ -93,7 +94,7 @@ tests/host/   host test suite: flash simulator, boot records, power-fail
 tools/        imgtool.py (keys, signing, verification, bad-image generation)
               and the on-target negative test script
 bench/        on-target cost measurement of the verification path
-third_party/  Mbed TLS 3.6 LTS, pinned as a submodule
+third_party/  Mbed TLS 3.6 LTS and FreeRTOS kernel V11.3.1, pinned as submodules
 docs/         design document and hardware notes
 ```
 
@@ -111,7 +112,7 @@ docs/         design document and hardware notes
 ```bash
 git clone https://github.com/leandroodorici/stm32-secure-ota.git
 cd stm32-secure-ota
-git submodule update --init third_party/mbedtls
+git submodule update --init third_party/mbedtls third_party/freertos
 
 python3 -m venv .venv
 .venv/bin/pip install -r tools/requirements.txt

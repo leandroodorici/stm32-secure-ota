@@ -127,7 +127,7 @@ jobs:
         # Passes cleanly when no sources exist yet, so this job is green from
         # the first commit and starts doing real work as soon as code lands.
         run: |
-          files=$(find common bootloader app transports tests \
+          files=$(find common bootloader app drivers transports tests \
                     \( -name '*.c' -o -name '*.h' \) 2>/dev/null || true)
           if [ -z "$files" ]; then
             echo "No C sources yet; nothing to check."

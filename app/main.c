@@ -4,6 +4,9 @@
 #include "task.h"
 
 #include "boot_handoff.h"
+#include "boot_info.h"
+#include "boot_record.h"
+#include "flash_stm32.h"
 #include "supervisor.h"
 
 // LD2, the user LED on the NUCLEO-G474RE, is on PA5
@@ -22,13 +25,25 @@ static StaticTask_t g_blink_tcb;
 static StackType_t g_blink_stack[BLINK_STACK_WORDS];
 static supervisor_id_t g_blink_id;
 
-// Blinks LD2: slowly in normal operation, fast after a watchdog reset, so the
-// reset cause is visible without a debugger. The magic check guards against
-// an application started some other way, where this RAM holds whatever was
-// there before.
+static flash_if_t g_flash;
+
+// How this image was booted. Not static, so it can be read over SWD by symbol
+// name: mdw &g_boot_info 8.
+boot_info_t g_boot_info;
+
+// Blinks LD2 at a rate that shows how the image is running, visible without a
+// debugger:
+//   fast   (125 ms)  the last reset was the watchdog
+//   medium (250 ms)  this image is on trial, not yet confirmed
+//   slow   (500 ms)  confirmed
+// The magic check guards against an application started some other way,
+// where the handoff RAM holds whatever was there before.
 static void blink_task(void *arg) {
     (void)arg;
     uint32_t half_period_ms = 500u;
+    if (g_boot_info.state == SLOT_TRIAL) {
+        half_period_ms = 250u;
+    }
     if (BOOT_HANDOFF->magic == BOOT_HANDOFF_MAGIC &&
         (BOOT_HANDOFF->reset_flags & RESET_FLAG_IWDG) != 0u) {
         half_period_ms = 125u;
@@ -50,6 +65,9 @@ int main(void) {
     // MODER holds 2 bits per pin. 01 is general-purpose output
     GPIOA_MODER &= ~(3u << (LED_PIN * 2));
     GPIOA_MODER |= (1u << (LED_PIN * 2));
+
+    flash_stm32_bind(&g_flash);
+    boot_info_load(&g_flash, &g_boot_info);
 
     g_blink_id = supervisor_register();
     (void)xTaskCreateStatic(blink_task, "blink", BLINK_STACK_WORDS, NULL, BLINK_PRIORITY,

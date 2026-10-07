@@ -2,20 +2,9 @@
 
 #include "boot_handoff.h"
 #include "boot_record.h"
+#include "flash_map.h"
 #include "flash_stm32.h"
 #include "image_verify.h"
-
-// Slot and boot state addresses, from the flash map in docs/DESIGN.md
-// section 4. Slot A is in bank 1 and slot B in bank 2, so the update agent
-// always writes to a bank it is not executing from.
-#define SLOT_A_BASE 0x08010000u
-#define SLOT_B_BASE 0x08040000u
-#define SLOT_SIZE (192u * 1024u)
-
-// Two 2 KB pages used as a ping-pong pair: when one fills, the other is
-// erased and writing continues there.
-#define BOOT_STATE_PAGE_A 0x0800F000u
-#define BOOT_STATE_PAGE_B 0x0800F800u
 
 // The application's vector table is not at the slot base. The first 512 bytes
 // hold the image header, so the table starts at +0x200. The offset is not

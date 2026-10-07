@@ -43,12 +43,13 @@ endfunction()
 add_firmware(bootloader bootloader/bootloader.ld
     bootloader/startup.c
     bootloader/main.c
-    bootloader/flash_stm32.c
+    drivers/flash_stm32.c
     common/boot_record.c
 )
 
 target_include_directories(bootloader PRIVATE
     ${CMAKE_SOURCE_DIR}/common/include
+    ${CMAKE_SOURCE_DIR}/drivers
     ${CMAKE_SOURCE_DIR}/bootloader
 )
 
@@ -86,12 +87,16 @@ set(APP_SOURCES
     app/startup.c
     app/main.c
     app/supervisor.c
+    app/boot_info.c
+    drivers/flash_stm32.c
+    common/boot_record.c
 )
 
 foreach(slot a b)
     add_firmware(app_slot_${slot} app/app_slot_${slot}.ld ${APP_SOURCES})
     target_include_directories(app_slot_${slot} PRIVATE
         ${CMAKE_SOURCE_DIR}/common/include
+         ${CMAKE_SOURCE_DIR}/drivers
         ${CMAKE_SOURCE_DIR}/app
     )
     target_link_libraries(app_slot_${slot} PRIVATE freertos_kernel)
