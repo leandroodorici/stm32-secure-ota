@@ -171,6 +171,21 @@ heartbeat. With the blinker's heartbeat removed but the task still running,
 the part reset after about 4 s with reset cause `0x24000000` (IWDG + PIN). 
 With it restored, the application ran indefinitely.
 
+**Status LED and fault button.** Verified 2026-10-07. A common-cathode RGB
+LED on the breadboard shows the system state, one resistor per channel: red
+on PA8 (D7), green on PB10 (D6), blue on PB5 (D4). Every pin and colour,
+including the mixed ones, was checked over SWD before any firmware drove
+them. B1 on PC13 reads 1 while pressed and 0 when released, measured by
+sampling it over SWD. This is the opposite of what Zephyr's board file for
+this board declares.
+
+Pressing B1 makes the fault task stop reporting its heartbeat while it keeps
+running. With slot B marked PENDING, one press on each of three trial boots
+made the supervisor withhold the watchdog each time. The bootloader then
+rejected slot B with reason 16 and the board returned to slot A, which reads
+seq 11 and last result 16 from its boot record. The whole trial and rollback
+sequence was observed on the LED, without a debugger.
+
 ## Do not do these
 
 **RDP level 2** on the G474. Irreversible, and there is one board.
@@ -188,7 +203,7 @@ Populated as milestones complete
 | Measurement | Value | Date |
 |-------------|-------|------|
 | Bootloader size | 20176 B text, 8 B data, 6488 B bss (full image verification; 6 KB of bss is the Mbed TLS buffer) | 2026-10-01 |
-| Application size | 4020 B text, 1988 B bss (FreeRTOS kernel, supervisor, blinker; all memory static) | 2026-10-05 |
+| Application size | 5640 B text, 2636 B bss (FreeRTOS kernel, supervisor, status and fault tasks, flash driver, boot records; all memory static) | 2026-10-07 |
 | Mbed TLS verify path | about 15.6 KB code (ECP, bignum, curve data, SHA-256, allocator) | 2026-09-30 |
 | Cold boot to application | | |
 | SHA-256 over a full slot | 901 ms at 16 MHz (14.41 M cycles, 73 cycles/byte), `MBEDTLS_SHA256_SMALLER` | 2026-09-30 |
