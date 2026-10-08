@@ -88,6 +88,9 @@ set(APP_SOURCES
     app/main.c
     app/supervisor.c
     app/boot_info.c
+    app/board.c
+    app/status.c
+    app/fault.c
     drivers/flash_stm32.c
     common/boot_record.c
 )
