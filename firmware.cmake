@@ -69,6 +69,7 @@ endif()
 add_library(freertos_kernel STATIC
     ${FREERTOS_DIR}/list.c
     ${FREERTOS_DIR}/queue.c
+    ${FREERTOS_DIR}/stream_buffer.c
     ${FREERTOS_DIR}/tasks.c
     ${FREERTOS_DIR}/portable/GCC/ARM_CM4F/port.c
 )
@@ -91,8 +92,12 @@ set(APP_SOURCES
     app/board.c
     app/status.c
     app/fault.c
+    app/comms.c
     drivers/flash_stm32.c
+    drivers/lpuart1.c
     common/boot_record.c
+    common/frame.c
+    common/protocol.c
 )
 
 foreach(slot a b)

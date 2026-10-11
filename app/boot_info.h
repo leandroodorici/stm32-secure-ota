@@ -10,7 +10,8 @@
 // before the scheduler runs.
 //
 // Every field is a full word so the structure can be read over SWD with a
-// single mdw.
+// single mdw. Fields are only ever added at the end, so earlier reads stay
+// valid.
 typedef struct {
     uint32_t slot;         // 0 = slot A, 1 = slot B
     uint32_t record_found; // 0 if no valid boot record exists
@@ -20,6 +21,10 @@ typedef struct {
     uint32_t primary_slot;
     uint32_t security_floor;
     uint32_t last_result;
+    uint32_t other_state;   // slot_state_t of the other slot
+    uint32_t image_version; // from this image's header
+    uint32_t image_counter; // security counter, from this image's header
+    uint32_t reset_flags;   // RCC_CSR flags handed over by the bootloader
 } boot_info_t;
 
 void boot_info_load(const flash_if_t *flash, boot_info_t *out);

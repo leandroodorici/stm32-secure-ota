@@ -150,5 +150,8 @@ jobs:
       - name: Install dependencies
         run: pip install -r tools/requirements.txt
 
-      - name: Run tests
+      - name: Run image tool tests
         run: python3 tools/test_imgtool.py
+
+      - name: Run link tests
+        run: python3 tools/test_link.py

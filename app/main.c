@@ -5,6 +5,7 @@
 
 #include "board.h"
 #include "boot_info.h"
+#include "comms.h"
 #include "fault.h"
 #include "flash_stm32.h"
 #include "status.h"
@@ -26,6 +27,7 @@ int main(void) {
     // is created, so the supervisor starts last
     status_start(&g_boot_info);
     fault_start();
+    comms_start(&g_boot_info);
     supervisor_start();
 
     vTaskStartScheduler();
