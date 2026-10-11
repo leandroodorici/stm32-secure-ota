@@ -186,6 +186,16 @@ rejected slot B with reason 16 and the board returned to slot A, which reads
 seq 11 and last result 16 from its boot record. The whole trial and rollback
 sequence was observed on the LED, without a debugger.
 
+**Serial link and STATUS.** Verified 2026-10-10. LPUART1 on PA2/PA3 reaches
+the host through the ST-LINK's USB serial port at 115200 baud, receiving in
+an interrupt at priority 6 into a FreeRTOS stream buffer. `tools/node.py
+status` returned the node's state, which matched the boot record. The
+reported reset cause followed real events: `PIN + SW` after an OpenOCD
+reset, `PIN` after B2, and `PIN + IWDG` after a fault injected with B1.
+Twenty consecutive requests all succeeded. After 4 KB of random bytes were
+written to the port, the next request was answered normally. The receiver
+drops invalid frames and resynchronises at the next delimiter.
+
 ## Do not do these
 
 **RDP level 2** on the G474. Irreversible, and there is one board.
@@ -203,7 +213,7 @@ Populated as milestones complete
 | Measurement | Value | Date |
 |-------------|-------|------|
 | Bootloader size | 20176 B text, 8 B data, 6488 B bss (full image verification; 6 KB of bss is the Mbed TLS buffer) | 2026-10-01 |
-| Application size | 5640 B text, 2636 B bss (FreeRTOS kernel, supervisor, status and fault tasks, flash driver, boot records; all memory static) | 2026-10-07 |
+| Application size | 9684 B text, 7360 B bss (adds LPUART1 driver, framing, protocol and comms task; all memory static) | 2026-10-10 |
 | Mbed TLS verify path | about 15.6 KB code (ECP, bignum, curve data, SHA-256, allocator) | 2026-09-30 |
 | Cold boot to application | | |
 | SHA-256 over a full slot | 901 ms at 16 MHz (14.41 M cycles, 73 cycles/byte), `MBEDTLS_SHA256_SMALLER` | 2026-09-30 |
