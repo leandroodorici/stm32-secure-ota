@@ -72,11 +72,25 @@ PROTO_VERSION = 1
 NODE_BROADCAST = 0xFF
 MSG_STATUS_REQ = 0x01
 MSG_STATUS = 0x02
+MSG_OFFER = 0x10
+MSG_ACCEPT = 0x11
+MSG_REJECT = 0x12
+MSG_CHUNK = 0x20
+MSG_CHUNK_ACK = 0x21
+MSG_COMMIT = 0x30
+MSG_VERIFY_RESULT = 0x31
+MSG_REBOOT = 0x40
+MSG_ABORT = 0x7F
+
+CHUNK_MAX = 1024
 
 SLOT_STATES = {0: "EMPTY", 1: "PENDING", 2: "TRIAL", 3: "CONFIRMED", 4: "REJECTED"}
 RESULTS = {0: "NONE", 1: "OK", 10: "BAD_MAGIC", 11: "BAD_HEADER", 12: "BAD_HASH",
            13: "BAD_SIGNATURE", 14: "WRONG_SLOT", 15: "ROLLBACK_BLOCKED",
-           16: "NOT_CONFIRMED", 17: "FLASH_ERROR", 18: "CRYPTO_ERROR"}
+           16: "NOT_CONFIRMED", 17: "FLASH_ERROR", 18: "CRYPTO_ERROR",
+           # Update reasons, upd_reason_t in common/include/protocol.h
+           32: "BUSY_TRIAL", 33: "TOO_LARGE", 34: "CHUNK_SIZE", 35: "NO_SESSION",
+           36: "CHUNK_CRC", 37: "INCOMPLETE", 38: "CANCELLED"}
 RESET_FLAGS = [(1 << 25, "OBL"), (1 << 26, "PIN"), (1 << 27, "BOR"), (1 << 28, "SW"),
                (1 << 29, "IWDG"), (1 << 30, "WWDG"), (1 << 31, "LPWR")]
 
@@ -87,6 +101,41 @@ def header(msg_type, node):
 
 def status_req(node=NODE_BROADCAST):
     return header(MSG_STATUS_REQ, node)
+
+
+def offer(image_size, version, counter, target_slot, chunk_size, digest,
+          node=NODE_BROADCAST):
+    if len(digest) != 32:
+        raise ValueError("digest must be 32 bytes")
+    return header(MSG_OFFER, node) + struct.pack(
+        "<IIIBxxxHxx", image_size, version, counter, target_slot, chunk_size) + digest
+
+
+def chunk(offset, data, node=NODE_BROADCAST):
+    if len(data) > CHUNK_MAX:
+        raise ValueError("chunk too large")
+    return header(MSG_CHUNK, node) + struct.pack(
+        "<IHxxI", offset, len(data), zlib.crc32(data)) + data
+
+
+def commit(node=NODE_BROADCAST):
+    return header(MSG_COMMIT, node)
+
+
+def reboot(delay_ms, node=NODE_BROADCAST):
+    return header(MSG_REBOOT, node) + struct.pack("<I", delay_ms)
+
+
+def abort(reason, node=NODE_BROADCAST):
+    return header(MSG_ABORT, node) + struct.pack("<I", reason)
+
+
+def decode_u32(msg):
+    # Decodes a reply carrying a single value: ACCEPT, REJECT, CHUNK_ACK,
+    # VERIFY_RESULT or ABORT. Returns (type, value), or None.
+    if len(msg) != 8 or msg[0] != PROTO_VERSION:
+        return None
+    return msg[1], struct.unpack_from("<I", msg, 4)[0]
 
 
 def decode_status(msg):

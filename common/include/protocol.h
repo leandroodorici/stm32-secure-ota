@@ -14,8 +14,9 @@
 //   2  node identifier: the node addressed, or the node replying
 //   3  reserved, sent as 0
 //
-// Only STATUS_REQ and STATUS exist so far. The remaining messages
-// arrive with the update agent.
+// Every message in section 9 is defined here. Each side implements only what
+// it needs: the node decodes what the gateway sends and encodes its replies,
+// and tools/link.py does the reverse.
 
 #define PROTO_VERSION 1u
 #define PROTO_HDR_LEN 4u
@@ -24,9 +25,31 @@
 #define PROTO_NODE_BROADCAST 0xFFu
 
 typedef enum {
-    MSG_STATUS_REQ = 0x01u,
-    MSG_STATUS = 0x02u,
+    MSG_STATUS_REQ = 0x01u,    // gateway -> node
+    MSG_STATUS = 0x02u,        // node -> gateway
+    MSG_OFFER = 0x10u,         // gateway -> node
+    MSG_ACCEPT = 0x11u,        // node -> gateway
+    MSG_REJECT = 0x12u,        // node -> gateway
+    MSG_CHUNK = 0x20u,         // gateway -> node
+    MSG_CHUNK_ACK = 0x21u,     // node -> gateway
+    MSG_COMMIT = 0x30u,        // gateway -> node
+    MSG_VERIFY_RESULT = 0x31u, // node -> gateway
+    MSG_REBOOT = 0x40u,        // gateway -> node
+    MSG_ABORT = 0x7Fu,         // either direction
 } msg_type_t;
+
+// Why a node refuses an OFFER or abandons an update, carried by REJECT and ABORT
+typedef enum {
+    UPD_ERR_BUSY_TRIAL = 32u, // the running image is on trial: the other slot
+                              // is its only fallback and must not be touched
+    UPD_ERR_TOO_LARGE = 33u,  // the image does not fit in a slot
+    UPD_ERR_CHUNK_SIZE = 34u, // chunk size zero, too large, or not a multiple
+                              // of the 8-byte flash programming unit
+    UPD_ERR_NO_SESSION = 35u, // CHUNK or COMMIT without an accepted OFFER
+    UPD_ERR_CHUNK_CRC = 36u,  // a chunk's data does not match its CRC
+    UPD_ERR_INCOMPLETE = 37u, // COMMIT before every byte has arrived
+    UPD_ERR_CANCELLED = 38u,  // the gateway sent ABORT
+} upd_reason_t;
 
 typedef struct {
     uint8_t version;
@@ -69,6 +92,65 @@ size_t proto_encode_status(const proto_status_t *s, uint8_t node, uint8_t *out,
 
 // Returns 1 if msg is a well-formed STATUS, 0 otherwise
 uint32_t proto_decode_status(const uint8_t *msg, size_t len, proto_status_t *out);
+
+// OFFER: the gateway proposes an image
+//
+//   4  image size: header, payload and trailer, as it will sit in the slot
+//   8  image version
+//  12  image security counter
+//  16  target slot (0 = A, 1 = B), then 3 bytes of padding
+//  20  chunk size, then 2 bytes of padding
+//  24  SHA-256 of the whole image, 32 bytes. Identifies the image, so an
+//      interrupted transfer is only ever resumed with the same image.
+typedef struct {
+    uint32_t image_size;
+    uint32_t version;
+    uint32_t security_counter;
+    uint8_t target_slot;
+    uint16_t chunk_size;
+    uint8_t digest[32];
+} proto_offer_t;
+
+#define PROTO_OFFER_LEN (PROTO_HDR_LEN + 52u)
+
+// Returns 1 if msg is a well-formed OFFER, 0 otherwise. Checks the format
+// only: whether the offer is acceptable is the update agent's decision.
+uint32_t proto_decode_offer(const uint8_t *msg, size_t len, proto_offer_t *out);
+
+// CHUNK: a piece of the image
+//
+//   4  offset in the image
+//   8  length, then 2 bytes of padding
+//  12  CRC-32 of the data
+//  16  the data
+typedef struct {
+    uint32_t offset;
+    uint16_t length;
+    uint32_t crc;
+    const uint8_t *data; // points into the message
+} proto_chunk_t;
+
+#define PROTO_CHUNK_MAX 1024u
+#define PROTO_CHUNK_HDR_LEN (PROTO_HDR_LEN + 12u)
+
+// Returns 1 if msg is a well-formed CHUNK whose length field matches the data
+// that follows and is at most PROTO_CHUNK_MAX, 0 otherwise. The CRC is not
+// checked here: a mismatch is reported to the gateway, so it is the update
+// agent's to detect.
+uint32_t proto_decode_chunk(const uint8_t *msg, size_t len, proto_chunk_t *out);
+
+// ACCEPT, REJECT, CHUNK_ACK, VERIFY_RESULT, REBOOT and ABORT carry a single
+// value: a resume offset, a reason, the next expected offset, a br_result_t,
+// a delay in milliseconds, a reason.
+#define PROTO_U32_LEN (PROTO_HDR_LEN + 4u)
+
+// Returns PROTO_U32_LEN, or 0 if out_size is too small
+size_t proto_encode_u32(uint8_t type, uint8_t node, uint32_t value, uint8_t *out,
+                        size_t out_size);
+
+// Returns 1 if msg is a well-formed message of the given type with a single
+// value, 0 otherwise
+uint32_t proto_decode_u32(const uint8_t *msg, size_t len, uint8_t type, uint32_t *value);
 
 // A STATUS_REQ is a header alone. Returns PROTO_HDR_LEN, or 0 if out_size is
 // too small.
