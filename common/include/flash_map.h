@@ -16,5 +16,9 @@
 // erased and writing continues there
 #define BOOT_STATE_PAGE_A 0x0800F000u
 #define BOOT_STATE_PAGE_B 0x0800F800u
+// The first two pages of the App data region hold the update agent's
+// progress log, the same ping-pong arrangement as the boot state
+#define PROGRESS_PAGE_A 0x08070000u
+#define PROGRESS_PAGE_B 0x08070800u
 
 #endif // FLASH_MAP_H
