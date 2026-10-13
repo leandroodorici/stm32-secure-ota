@@ -10,6 +10,7 @@ add_library(ota_core STATIC
     ${CMAKE_SOURCE_DIR}/common/image_verify.c
     ${CMAKE_SOURCE_DIR}/common/frame.c
     ${CMAKE_SOURCE_DIR}/common/protocol.c
+    ${CMAKE_SOURCE_DIR}/common/progress.c
 )
 target_include_directories(ota_core PUBLIC ${CMAKE_SOURCE_DIR}/common/include)
 target_link_libraries(ota_core PUBLIC boot_crypto)
@@ -34,6 +35,7 @@ add_host_test(test_boot_record)
 add_host_test(test_powerfail)
 add_host_test(test_frame)
 add_host_test(test_protocol)
+add_host_test(test_progress)
 
 # ---- image verification against imgtool.py ----
 #
