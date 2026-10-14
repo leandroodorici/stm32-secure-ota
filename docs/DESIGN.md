@@ -93,6 +93,14 @@ milliseconds, and a single-bank configuration would stall the CPU for that
 entire period. Stalls of that length cause dropped CAN frames and missed
 sensor samples during an update.
 
+Reading one bank while writing the other needs one precaution on this part.
+Erratum 2.2.2 of ES0430 lets the flash data cache be corrupted while the
+other bank is programmed or erased, so the driver turns the data cache off
+for each operation. Two kinds of write do stall the CPU: boot records, in bank 1, 
+and the progress log, in bank 2, which is the running bank when the application 
+runs from slot B. Both are short, written at most once per 2 KB received, and the 
+stop-and-wait protocol has nothing in flight while they happen.
+
 Within a slot, the image header occupies the first 512 bytes and the vector
 table begins at offset 0x200. The offset is not arbitrary. The Cortex-M4 vector
 table offset register requires the table to be aligned to a power of two at
@@ -333,6 +341,15 @@ can only commit to an image it could subsequently replace.
 The independent watchdog is fed by a supervisor task that checks a heartbeat
 from every other task. It is never fed from the idle hook, which would allow a
 deadlocked task to go unnoticed while the watchdog stays happy.
+
+A task busy with one long operation cannot report a heartbeat partway
+through. COMMIT verifies the whole image in a single call, about 2 s for a
+30 KB image and 2.6 s for a full slot. Before it starts, the comms task
+excuses itself from the supervisor's checks for a bounded time, 4 s, and its
+next heartbeat ends the excuse. A verification that hangs still stops the
+watchdog being fed once the excuse runs out. The comms task runs at the
+status task's priority, so during verification the two share the processor
+rather than one starving the other.
 
 ### 8.5 Anti-rollback with a separate counter
 

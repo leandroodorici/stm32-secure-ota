@@ -196,6 +196,36 @@ Twenty consecutive requests all succeeded. After 4 KB of random bytes were
 written to the port, the next request was answered normally. The receiver
 drops invalid frames and resynchronises at the next delimiter.
 
+**Updates over UART.** Verified 2026-10-14. `tools/node.py update` sent a
+30.5 KB image signed for slot B to the application running from slot A, in
+1 KB chunks: 6.0 s of transfer, then 2.0 s for COMMIT, which hashes and
+verifies the whole image on the node. STATUS then reported slot B PENDING
+with last result OK, and an unchanged reset cause, so verification did not
+trip the watchdog. Sampling the LED pins over SWD showed yellow throughout
+the transfer, magenta for about 1.8 s of verification, then green. An update
+stopped after 14336 bytes, followed by `node.py reboot`, resumed at that
+offset, a page boundary, and completed. `node.py reboot` after COMMIT started
+slot B on trial with a blinking blue LED, and a new OFFER was refused with
+BUSY_TRIAL. Three resets without confirmation returned the board to slot A,
+with slot B REJECTED and last result NOT_CONFIRMED shown as a red flash every
+2 s. The comms task's stack, filled with 0xA5 when the task is created, had
+used at most 1828 of its 4096 bytes after a verification.
+
+**Data cache corruption during read-while-write.** Found 2026-10-14. Repeated
+updates failed about once in twenty: usually a HardFault in the SysTick
+handler followed by a watchdog reset, and once a FLASH_ERROR reply with no
+reset. A diagnostic build logging to CCM SRAM, which survives a reset,
+caught a precise bus fault on a read from a meaningless address while the
+update agent was programming bank 2, with PGSERR and PGAERR set in the flash
+status register by a stray write. Both are what a corrupted constant, loaded
+from bank 1, produces. This is erratum 2.2.2 of ES0430, "Data cache might be
+corrupted during Flash memory read-while-write operation". The driver now
+turns the data cache off for each program and erase, and resets it before
+turning it back on, as Zephyr's driver for this part does. With that change
+150 consecutive updates, about 1.2 million flash operations, completed in one
+boot with no fault and no missed heartbeat. The bootloader only writes the
+bank it runs from, but it shares the driver.
+
 ## Do not do these
 
 **RDP level 2** on the G474. Irreversible, and there is one board.
@@ -212,8 +242,10 @@ Populated as milestones complete
 
 | Measurement | Value | Date |
 |-------------|-------|------|
-| Bootloader size | 20176 B text, 8 B data, 6488 B bss (full image verification; 6 KB of bss is the Mbed TLS buffer) | 2026-10-01 |
-| Application size | 9684 B text, 7360 B bss (adds LPUART1 driver, framing, protocol and comms task; all memory static) | 2026-10-10 |
+| Bootloader size | 20204 B text, 8 B data, 6488 B bss (full image verification; 6 KB of bss is the Mbed TLS buffer) | 2026-10-14 |
+| Application size | 29912 B text, 12 B data, 17012 B bss (adds the update agent and image verification; 6 KB of bss is the Mbed TLS buffer, 4 KB the comms stack) | 2026-10-14 |
+| Update over UART, 30.5 KB image | 6.0 s transfer at 115200 baud in 1 KB chunks, 2.0 s COMMIT | 2026-10-14 |
+| Comms task stack, peak | 1828 B of 4096, after a verification | 2026-10-14 |
 | Mbed TLS verify path | about 15.6 KB code (ECP, bignum, curve data, SHA-256, allocator) | 2026-09-30 |
 | Cold boot to application | | |
 | SHA-256 over a full slot | 901 ms at 16 MHz (14.41 M cycles, 73 cycles/byte), `MBEDTLS_SHA256_SMALLER` | 2026-09-30 |
