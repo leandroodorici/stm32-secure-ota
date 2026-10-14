@@ -6,9 +6,12 @@ The fixed frames and the STATUS message are the same bytes the C tests use
 the node are held to one definition.
 """
 
+import hashlib
 import os
 import random
+import struct
 import sys
+import zlib
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import link  # noqa: E402
@@ -95,6 +98,97 @@ for name, msg_type, value, raw in [
         ("VERIFY_RESULT", link.MSG_VERIFY_RESULT, 1, "0131010001000000")]:
     check(link.decode_u32(bytes.fromhex(raw)) == (msg_type, value), f"{name} decodes")
 check(link.decode_u32(bytes.fromhex("01110100000800")) is None, "a short reply is rejected")
+
+print("update client")
+
+
+class FakeNode:
+    # Answers the update messages the way common/update_agent.c does, over an
+    # unreliable line: every lost-th reply is dropped, and the chunks at the
+    # offsets in damage arrive with a flipped bit, once each.
+    def __init__(self, resume=0, floor=0, lost=0, damage=()):
+        self.resume, self.floor, self.lost = resume, floor, lost
+        self.damage = set(damage)
+        self.slot = bytearray()
+        self.next = None
+        self.replies = []
+        self.sent = 0
+        self.size = 0
+
+    def flush(self):
+        self.replies.clear()
+
+    def reply(self, msg_type, value):
+        self.sent += 1
+        if self.lost and self.sent % self.lost == 0:
+            return
+        self.replies.append(link.header(msg_type, 1) + struct.pack("<I", value))
+
+    def send(self, msg):
+        kind = msg[1]
+        if kind == link.MSG_OFFER:
+            self.size, _, counter, _, self.chunk = struct.unpack_from("<IIIBxxxH", msg, 4)
+            if counter < self.floor:
+                return self.reply(link.MSG_REJECT, 15)
+            self.next = self.resume
+            del self.slot[self.resume:]
+            return self.reply(link.MSG_ACCEPT, self.resume)
+        if kind == link.MSG_CHUNK:
+            offset, length, crc = struct.unpack_from("<IHxxI", msg, 4)
+            data = bytearray(msg[16:])
+            if offset in self.damage:
+                self.damage.discard(offset)
+                data[0] ^= 1
+            if offset != self.next:
+                return self.reply(link.MSG_CHUNK_ACK, self.next)
+            if length != min(self.chunk, self.size - offset):
+                return self.reply(link.MSG_REJECT, 34)
+            if zlib.crc32(data) != crc:
+                return self.reply(link.MSG_REJECT, link.UPD_ERR_CHUNK_CRC)
+            self.slot += data
+            self.next += length
+            return self.reply(link.MSG_CHUNK_ACK, self.next)
+        if kind == link.MSG_COMMIT:
+            ok = self.next == self.size
+            return self.reply(link.MSG_VERIFY_RESULT, link.RESULT_OK if ok else 37)
+
+    def receive(self, timeout):
+        return self.replies.pop(0) if self.replies else None
+
+
+# A header for slot B, version 1.2.3, counter 5, then a payload: the client
+# reads only the header, so the image need not be signed
+IMAGE = struct.pack("<IHHIIIII", link.IMG_MAGIC, 1, 0x200, 0x08040000, 4000,
+                    (1 << 24) | (2 << 16) | 3, 0, 5) + bytes(range(256)) * 20
+
+o = link.image_offer(IMAGE)
+check(o[16] == 1 and struct.unpack_from("<III", o, 4) == (len(IMAGE), 0x01020003, 5),
+      "OFFER fields come from the image header")
+check(o[24:] == hashlib.sha256(IMAGE).digest(), "OFFER carries the image's SHA-256")
+
+node = FakeNode()
+check(link.update(node, IMAGE, timeout=0, commit_timeout=0) == 0 and node.slot == IMAGE,
+      "a whole update arrives intact")
+
+node = FakeNode(lost=3)
+check(link.update(node, IMAGE, timeout=0, commit_timeout=0) == 0 and node.slot == IMAGE,
+      "lost replies are recovered from")
+
+node = FakeNode(damage=(1024, 3072))
+check(link.update(node, IMAGE, timeout=0, commit_timeout=0) == 0 and node.slot == IMAGE,
+      "damaged chunks are sent again")
+
+node = FakeNode(resume=2048)
+node.slot = bytearray(IMAGE[:2048])
+check(link.update(node, IMAGE, timeout=0, commit_timeout=0) == 2048 and node.slot == IMAGE,
+      "a resumed update continues from the offset accepted")
+
+node = FakeNode(floor=6)
+try:
+    link.update(node, IMAGE, timeout=0, commit_timeout=0)
+    check(False, "a refused OFFER raises UpdateError")
+except link.UpdateError as e:
+    check("ROLLBACK_BLOCKED" in str(e), "a refused OFFER raises UpdateError with the reason")
 
 print(f"\n{len(failures)} failure(s)")
 sys.exit(1 if failures else 0)

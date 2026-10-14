@@ -6,6 +6,7 @@ tests/host/test_protocol.c), so they cannot drift apart.
 """
 
 import glob
+import hashlib
 import struct
 import time
 import zlib
@@ -81,6 +82,9 @@ MSG_COMMIT = 0x30
 MSG_VERIFY_RESULT = 0x31
 MSG_REBOOT = 0x40
 MSG_ABORT = 0x7F
+
+RESULT_OK = 1
+UPD_ERR_CHUNK_CRC = 36
 
 CHUNK_MAX = 1024
 
@@ -158,6 +162,98 @@ def format_reset(flags):
     return " + ".join(names) if names else "none"
 
 
+# ---- updates ----
+
+IMG_MAGIC = 0x31474D49  # "IMG1"
+SLOT_BASES = {0x08010000: 0, 0x08040000: 1}
+
+
+def image_offer(image, chunk_size=CHUNK_MAX, node=NODE_BROADCAST):
+    # The OFFER for a signed image, its fields read from the image's own
+    # header. The target is the slot the image was signed for.
+    if len(image) < 28:
+        raise ValueError("too short to be a signed image")
+    magic, _, _, load_addr, _, version, _, counter = struct.unpack_from("<IHHIIIII", image)
+    if magic != IMG_MAGIC:
+        raise ValueError("not a signed image")
+    if load_addr not in SLOT_BASES:
+        raise ValueError(f"signed for 0x{load_addr:08x}, which is not a slot")
+    return offer(len(image), version, counter, SLOT_BASES[load_addr], chunk_size,
+                 hashlib.sha256(image).digest(), node)
+
+
+def result_name(value):
+    return RESULTS.get(value, str(value))
+
+
+def request(lk, payload, types, timeout=1.0, attempts=5):
+    # Sends payload until a single-value reply of one of the given types
+    # arrives, resending after each timeout. Returns (type, value), or None
+    # once every attempt has timed out.
+    for _ in range(attempts):
+        lk.flush()
+        lk.send(payload)
+        deadline = time.monotonic() + timeout
+        while True:
+            msg = lk.receive(max(deadline - time.monotonic(), 0))
+            if msg is None:
+                break
+            reply = decode_u32(msg)
+            if reply is not None and reply[0] in types:
+                return reply
+    return None
+
+
+class UpdateError(Exception):
+    pass
+
+
+def update(lk, image, chunk_size=CHUNK_MAX, progress=None, timeout=1.0,
+           commit_timeout=5.0):
+    # Sends a signed image: OFFER, then CHUNKs from the offset the node
+    # accepts, then COMMIT. Returns the offset the node resumed from. Raises
+    # UpdateError if the node refuses, or stops answering. COMMIT waits
+    # longer, since the node verifies the whole image before it answers.
+    reply = request(lk, image_offer(image, chunk_size), {MSG_ACCEPT, MSG_REJECT},
+                    timeout)
+    if reply is None:
+        raise UpdateError("no answer to OFFER")
+    if reply[0] == MSG_REJECT:
+        raise UpdateError(f"OFFER rejected: {result_name(reply[1])}")
+    resumed = offset = reply[1]
+
+    damaged = 0
+    while offset < len(image):
+        data = image[offset:offset + chunk_size]
+        reply = request(lk, chunk(offset, data), {MSG_CHUNK_ACK, MSG_REJECT, MSG_ABORT},
+                        timeout)
+        if reply is None:
+            raise UpdateError(f"no answer to the chunk at {offset}")
+        kind, value = reply
+        if kind == MSG_CHUNK_ACK and value <= len(image):
+            # The node names the offset it expects next. Following it, rather
+            # than counting, also recovers from a reply that was lost.
+            offset = value
+            damaged = 0
+        elif kind == MSG_REJECT and value == UPD_ERR_CHUNK_CRC and damaged < 5:
+            damaged += 1  # damaged on the way: send it again
+            continue
+        else:
+            raise UpdateError(f"chunk at {offset}: {result_name(value)}")
+        if progress is not None:
+            progress(offset, len(image))
+
+    # Once only: the node ends the session on COMMIT, so a second COMMIT
+    # would be answered NO_SESSION whatever the outcome of the first
+    reply = request(lk, commit(), {MSG_VERIFY_RESULT, MSG_REJECT}, commit_timeout,
+                    attempts=1)
+    if reply is None:
+        raise UpdateError("no answer to COMMIT")
+    if reply[0] != MSG_VERIFY_RESULT or reply[1] != RESULT_OK:
+        raise UpdateError(f"COMMIT: {result_name(reply[1])}")
+    return resumed
+
+
 # ---- serial transport ----
 
 def default_port():
@@ -173,7 +269,14 @@ class Link:
         self.rx = bytearray()
 
     def close(self):
+        self.ser.flush()  # a message just sent leaves before the port closes
         self.ser.close()
+
+    def flush(self):
+        # Drops anything received but not yet read, such as a late reply to
+        # an earlier request
+        self.ser.reset_input_buffer()
+        self.rx.clear()
 
     def send(self, payload):
         # A leading delimiter ends any partial frame the node may hold
@@ -195,8 +298,7 @@ class Link:
         return None
 
     def status(self, node=NODE_BROADCAST, timeout=1.0):
-        self.ser.reset_input_buffer()
-        self.rx.clear()
+        self.flush()
         self.send(status_req(node))
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
