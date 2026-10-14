@@ -82,11 +82,27 @@ static void lock(void) {
     FLASH_CR |= CR_LOCK;
 }
 
+// The data cache can be corrupted when it is filled from one bank while the
+// other is being programmed or erased, so it stays off for the whole operation.
+// Seen on target as constants loaded from bank 1 turning into wild addresses while
+// the update agent programmed bank 2. Returns the ACR value to restore.
+static uint32_t dcache_off(void) {
+    uint32_t acr = FLASH_ACR;
+    FLASH_ACR = acr & ~ACR_DCEN;
+    return acr;
+}
+
+// Resets the data cache, which may hold corrupted lines, then restores acr.
+// RM0440 only allows a cache to be reset while it is disabled.
+static void dcache_restore(uint32_t acr) {
+    FLASH_ACR = (acr & ~ACR_DCEN) | ACR_DCRST;
+    FLASH_ACR = acr & ~ACR_DCRST;
+}
+
 // The instruction and data caches are enabled at reset and an erase does not
 // update them, so a read after erasing can return the page's old contents.
-// RM0440 only allows a cache to be reset while it is disabled.
-static void flush_caches(void) {
-    uint32_t acr = FLASH_ACR;
+// Resets both, then restores acr.
+static void flush_caches(uint32_t acr) {
     FLASH_ACR = acr & ~(ACR_ICEN | ACR_DCEN);
     FLASH_ACR = (acr & ~(ACR_ICEN | ACR_DCEN)) | ACR_ICRST | ACR_DCRST;
     FLASH_ACR = acr & ~(ACR_ICRST | ACR_DCRST);
@@ -126,11 +142,12 @@ static flash_status_t stm32_erase_page(void *ctx, uint32_t addr) {
         cr |= CR_BKER;
     }
     FLASH_CR = cr;
+    uint32_t acr = dcache_off();
     FLASH_CR = cr | CR_STRT;
 
     st = wait_idle();
     FLASH_CR &= ~CR_PER;
-    flush_caches();
+    flush_caches(acr);
     lock();
     return st;
 }
@@ -149,6 +166,7 @@ static flash_status_t stm32_program_dw(void *ctx, uint32_t addr, uint64_t data) 
         return st;
     }
     unlock();
+    uint32_t acr = dcache_off();
     FLASH_CR |= CR_PG;
 
     // A double-word program is two 32-bit writes to consecutive addresses.
@@ -161,6 +179,7 @@ static flash_status_t stm32_program_dw(void *ctx, uint32_t addr, uint64_t data) 
 
     st = wait_idle();
     FLASH_CR &= ~CR_PG;
+    dcache_restore(acr);
     lock();
     return st;
 }
