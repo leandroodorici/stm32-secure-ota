@@ -98,6 +98,10 @@ set(APP_SOURCES
     common/boot_record.c
     common/frame.c
     common/protocol.c
+    common/image_verify.c
+    common/progress.c
+    common/update_agent.c
+    $<TARGET_OBJECTS:boot_pubkey>
 )
 
 foreach(slot a b)
@@ -107,7 +111,7 @@ foreach(slot a b)
          ${CMAKE_SOURCE_DIR}/drivers
         ${CMAKE_SOURCE_DIR}/app
     )
-    target_link_libraries(app_slot_${slot} PRIVATE freertos_kernel)
+    target_link_libraries(app_slot_${slot} PRIVATE freertos_kernel boot_crypto)
 endforeach()
 
 include(${CMAKE_SOURCE_DIR}/cmake/boot_crypto.cmake)
@@ -171,8 +175,13 @@ add_custom_command(
     COMMENT "Embedding public key from ${BOOT_PUBKEY}"
 )
 
+# A library rather than a source of each firmware, so the command that
+# generates it belongs to one target and a parallel build runs it once. The
+# application checks received images against the same key.
+add_library(boot_pubkey OBJECT ${CMAKE_CURRENT_BINARY_DIR}/boot_pubkey.c)
+
 target_sources(bootloader PRIVATE
     common/image_verify.c
-    ${CMAKE_CURRENT_BINARY_DIR}/boot_pubkey.c
+    $<TARGET_OBJECTS:boot_pubkey>
 )
 target_link_libraries(bootloader PRIVATE boot_crypto)

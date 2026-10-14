@@ -23,6 +23,12 @@
 #define BLUE_PIN 5u   // PB5
 #define B1_PIN 13u    // PC13
 
+// Cortex-M4 application interrupt and reset control register. Writes are
+// ignored unless the upper half holds the key.
+#define SCB_AIRCR (*(volatile uint32_t *)0xE000ED0Cu)
+#define AIRCR_VECTKEY (0x05FAu << 16)
+#define AIRCR_SYSRESETREQ (1u << 2)
+
 // MODER holds two bits per pin: 00 input, 01 output. Every pin starts in
 // analog mode (11) after reset, where the input reads as 0.
 static void make_output(uint32_t port, uint32_t pin) {
@@ -66,4 +72,13 @@ void board_ld2_toggle(void) {
 
 uint32_t board_button_pressed(void) {
     return (GPIO_IDR(GPIOC) & (1u << B1_PIN)) != 0u;
+}
+
+void board_reset(void) {
+    // Outstanding writes complete first, so nothing is lost half-written
+    __asm volatile("dsb" ::: "memory");
+    SCB_AIRCR = AIRCR_VECTKEY | AIRCR_SYSRESETREQ;
+    __asm volatile("dsb" ::: "memory");
+    for (;;) {
+    }
 }

@@ -27,7 +27,7 @@ int main(void) {
     // is created, so the supervisor starts last
     status_start(&g_boot_info);
     fault_start();
-    comms_start(&g_boot_info);
+    comms_start(&g_boot_info, &g_flash);
     supervisor_start();
 
     vTaskStartScheduler();

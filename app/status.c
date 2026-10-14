@@ -23,6 +23,11 @@ static StaticTask_t g_tcb;
 static StackType_t g_stack[STATUS_STACK_WORDS];
 static supervisor_id_t g_id;
 static const boot_info_t *g_info;
+static volatile uint32_t g_activity;
+
+void status_set_activity(activity_t activity) {
+    g_activity = (uint32_t)activity;
+}
 
 static void status_task(void *arg) {
     (void)arg;
@@ -49,6 +54,10 @@ static void status_task(void *arg) {
         rgb_t colour = base;
         if (fault_injected()) {
             colour = RGB_WHITE;
+        } else if (g_activity == ACTIVITY_VERIFYING) {
+            colour = RGB_MAGENTA;
+        } else if (g_activity == ACTIVITY_RECEIVING) {
+            colour = RGB_YELLOW;
         } else if (rejected && (step % REJECT_PERIOD_STEPS) < REJECT_FLASH_STEPS) {
             colour = RGB_RED;
         } else if (trial && ((step / TRIAL_STEPS) % 2u) == 1u) {

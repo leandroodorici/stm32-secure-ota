@@ -32,4 +32,7 @@ void board_rgb(rgb_t colour);
 void board_ld2_toggle(void);
 uint32_t board_button_pressed(void);
 
+// Resets the whole part, as the reset pin would. Does not return.
+void board_reset(void);
+
 #endif // BOARD_H
