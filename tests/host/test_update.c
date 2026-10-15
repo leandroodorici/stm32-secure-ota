@@ -498,6 +498,157 @@ static void test_no_resume_into_a_verified_slot(void) {
 // Resuming is counted, so a change that quietly always restarts from zero
 // fails the test instead of passing it more slowly.
 
+// ---- confirmation ----
+
+// Slot A, the running slot, on trial after an update from slot B, which is
+// still CONFIRMED and primary. filler more copies of that record are appended,
+// so the confirmation can be made to land at the end of a page.
+static boot_record_t on_trial(int filler) {
+    boot_record_t rec = record();
+    rec.primary_slot = 1;
+    rec.slot_state[0] = SLOT_TRIAL;
+    rec.trial_attempts = 2;
+    rec.last_result = BR_RESULT_OK;
+    for (int i = 0; i <= filler; i++) {
+        append(&rec);
+    }
+    return record();
+}
+
+static void test_confirm_trial_image(void) {
+    setup();
+    boot_record_t before = on_trial(0);
+
+    CHECK_EQ(upd_confirm(&g_agent, 5), BR_RESULT_OK);
+    boot_record_t rec = record();
+    CHECK_EQ(rec.seq, before.seq + 1u);
+    CHECK_EQ(rec.slot_state[0], SLOT_CONFIRMED);
+    CHECK_EQ(rec.primary_slot, 0);
+    CHECK_EQ(rec.security_floor, 5u);
+    CHECK_EQ(rec.last_result, BR_RESULT_OK);
+    // The previous image stays a fallback, and the attempt count stays as a
+    // record of how the trial went
+    CHECK_EQ(rec.slot_state[1], SLOT_CONFIRMED);
+    CHECK_EQ(rec.trial_attempts, 2);
+    CHECK(slot_b_holds(&g_old));
+    CHECK(untouched_elsewhere());
+}
+
+static void test_confirm_never_lowers_the_floor(void) {
+    setup();
+    boot_record_t rec = on_trial(0);
+    rec.security_floor = 7;
+    append(&rec);
+
+    CHECK_EQ(upd_confirm(&g_agent, 5), BR_RESULT_OK);
+    CHECK_EQ(record().security_floor, 7u);
+    CHECK_EQ(record().slot_state[0], SLOT_CONFIRMED);
+}
+
+static void test_confirm_twice_writes_once(void) {
+    // A confirmed image is confirmed again without a write, so the
+    // application can retry without knowing whether the first one landed
+    setup();
+    (void)on_trial(0);
+    CHECK_EQ(upd_confirm(&g_agent, 5), BR_RESULT_OK);
+    long writes = g_sf.erases + g_sf.programs;
+    uint32_t seq = record().seq;
+
+    CHECK_EQ(upd_confirm(&g_agent, 5), BR_RESULT_OK);
+    CHECK_EQ(g_sf.erases + g_sf.programs, writes);
+    CHECK_EQ(record().seq, seq);
+}
+
+static void test_confirm_only_from_trial(void) {
+    // A running slot is never EMPTY, PENDING or REJECTED in practice, but if
+    // the record says so it is not the application's to overrule
+    static const uint8_t states[] = {SLOT_EMPTY, SLOT_PENDING, SLOT_REJECTED};
+    for (size_t i = 0; i < sizeof(states); i++) {
+        setup();
+        boot_record_t rec = on_trial(0);
+        rec.slot_state[0] = states[i];
+        append(&rec);
+        long writes = g_sf.erases + g_sf.programs;
+
+        CHECK_EQ(upd_confirm(&g_agent, 5), BR_RESULT_NONE);
+        CHECK_EQ(g_sf.erases + g_sf.programs, writes);
+        CHECK_EQ(record().slot_state[0], states[i]);
+    }
+}
+
+static void test_update_after_confirm(void) {
+    // On trial nothing is accepted. Once confirmed, the old primary can be
+    // updated, but not with an image below the floor the confirmation raised.
+    setup();
+    (void)on_trial(0);
+    proto_offer_t o = offer_for(&g_new);
+    CHECK_EQ(upd_offer(&g_agent, &o).value, UPD_ERR_BUSY_TRIAL);
+
+    CHECK_EQ(upd_confirm(&g_agent, 5), BR_RESULT_OK);
+    proto_offer_t old = offer_for(&g_old);
+    upd_reply_t r = upd_offer(&g_agent, &old);
+    CHECK_EQ(r.type, MSG_REJECT);
+    CHECK_EQ(r.value, BR_RESULT_ROLLBACK_BLOCKED);
+    CHECK_EQ(transfer(&g_new, CHUNK, NULL), BR_RESULT_OK);
+    CHECK_EQ(record().slot_state[1], SLOT_PENDING);
+}
+
+// Every power cut during a confirmation leaves the trial record or the
+// confirmed one, never anything else, and confirming again then completes it.
+// Run once with room in the page, and once with the confirmation landing on
+// a page change, where it erases the other page first.
+static boot_record_t confirm_cut(int filler, long cut, int tear) {
+    setup();
+    boot_record_t trial = on_trial(filler);
+    sim_flash_arm_cut(&g_sf, cut, tear != 0);
+    (void)upd_confirm(&g_agent, 5);
+    return trial;
+}
+
+static void test_power_cut_during_confirm(void) {
+    // The factory record and the trial record, then filler: BR_PER_PAGE - 2
+    // fills the first page exactly
+    static const int fillers[] = {0, (int)BR_PER_PAGE - 2};
+    long failures = 0;
+    for (size_t f = 0; f < 2; f++) {
+        (void)confirm_cut(fillers[f], -1, 0);
+        long total = g_sf.ops;
+        // Four double-words, and with a page change an erase before them
+        CHECK_EQ(total, f == 0 ? 4 : 5);
+        for (long cut = 1; cut <= total; cut++) {
+            for (int tear = 0; tear < 2; tear++) {
+                boot_record_t trial = confirm_cut(fillers[f], cut, tear);
+                reboot();
+
+                boot_record_t rec = record();
+                int still_trial = rec.seq == trial.seq &&
+                                  rec.slot_state[0] == SLOT_TRIAL &&
+                                  rec.primary_slot == 1 && rec.security_floor == FLOOR;
+                int confirmed = rec.seq == trial.seq + 1u &&
+                                rec.slot_state[0] == SLOT_CONFIRMED &&
+                                rec.primary_slot == 0 && rec.security_floor == 5u;
+                const char *why = NULL;
+                if (!still_trial && !confirmed) {
+                    why = "neither the trial record nor the confirmed one";
+                } else if (upd_confirm(&g_agent, 5) != BR_RESULT_OK ||
+                           record().slot_state[0] != SLOT_CONFIRMED) {
+                    why = "confirming again did not complete";
+                } else if (!untouched_elsewhere()) {
+                    why = "flash written outside the boot state";
+                }
+                if (why != NULL) {
+                    printf("  FAIL filler=%d cut=%ld tear=%d: %s\n", fillers[f], cut,
+                           tear, why);
+                    failures++;
+                }
+            }
+        }
+        printf("  filler %d: swept %ld flash operations x 2 cut modes\n", fillers[f],
+               total);
+    }
+    CHECK_EQ(failures, 0);
+}
+
 static long run_cut(long cut, int tear) {
     setup();
     sim_flash_arm_cut(&g_sf, cut, tear != 0);
@@ -573,4 +724,10 @@ RUN(test_resume_after_abort);
 RUN(test_resume_only_for_the_same_image);
 RUN(test_no_resume_into_a_verified_slot);
 RUN(test_power_cut_at_every_operation);
+RUN(test_confirm_trial_image);
+RUN(test_confirm_never_lowers_the_floor);
+RUN(test_confirm_twice_writes_once);
+RUN(test_confirm_only_from_trial);
+RUN(test_update_after_confirm);
+RUN(test_power_cut_during_confirm);
 TEST_MAIN_END()

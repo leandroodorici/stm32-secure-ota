@@ -209,3 +209,31 @@ upd_reply_t upd_commit(upd_agent_t *a) {
 void upd_abort(upd_agent_t *a) {
     a->active = 0;
 }
+
+br_result_t upd_confirm(upd_agent_t *a, uint32_t image_counter) {
+    boot_record_t rec;
+    if (!boot_record_load(&a->boot, &rec)) {
+        return BR_RESULT_FLASH_ERROR;
+    }
+    if (rec.slot_state[a->running_slot] == SLOT_CONFIRMED) {
+        return BR_RESULT_OK;
+    }
+    if (rec.slot_state[a->running_slot] != SLOT_TRIAL) {
+        return BR_RESULT_NONE;
+    }
+
+    // One record, so a power cut leaves either the trial or all of this. The
+    // other slot keeps its state: a confirmed image there stays a fallback,
+    // and from now on the floor decides whether it can still boot.
+    boot_record_t next = rec;
+    next.slot_state[a->running_slot] = SLOT_CONFIRMED;
+    next.primary_slot = a->running_slot;
+    if (image_counter > next.security_floor) {
+        next.security_floor = image_counter;
+    }
+    next.last_result = BR_RESULT_OK;
+    if (boot_record_append(&a->boot, &next) != FLASH_OK) {
+        return BR_RESULT_FLASH_ERROR;
+    }
+    return BR_RESULT_OK;
+}

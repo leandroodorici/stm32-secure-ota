@@ -12,7 +12,8 @@
 // The node's side of an update
 //
 // Receives an image into the slot the node is not running from, and marks it
-// PENDING once the whole slot verifies. Independent of the transport: the
+// PENDING once the whole slot verifies. Confirms the running image once the
+// application has found it healthy. Independent of the transport: the
 // caller decodes each message, passes it here, and sends back the reply.
 //
 // The invariants it keeps, whatever the gateway sends and wherever power is
@@ -68,5 +69,16 @@ upd_reply_t upd_commit(upd_agent_t *a);
 
 // The gateway's ABORT: ends the transfer, keeping its progress for a resume
 void upd_abort(upd_agent_t *a);
+
+// Confirms the running image, called by the application once its health
+// check passes. One record moves the running slot from TRIAL to CONFIRMED,
+// makes it primary, and raises the security floor to image_counter, the
+// running image's own counter.
+//
+// Returns BR_RESULT_OK once the running slot is confirmed, including when it
+// already was, in which case nothing is written. Returns BR_RESULT_NONE, also
+// writing nothing, when the running slot is in any other state, and
+// BR_RESULT_FLASH_ERROR when the boot record cannot be read or written.
+br_result_t upd_confirm(upd_agent_t *a, uint32_t image_counter);
 
 #endif // UPDATE_AGENT_H
