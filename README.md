@@ -23,8 +23,8 @@ about the hardware, and how it was checked, is in
 | M0 | Image tooling, boot records, flash simulator, power-fail test, CI | Done |
 | M1 | Boot core: slot selection, jump, trial counting, watchdog | Done, verified on hardware |
 | M2 | Signature verification on the device, negative tests on hardware | Done, verified on hardware |
-| M3 | Updates over UART: application, update agent, resume, anti-rollback | Next |
-| M4 | CAN link with ISO-TP on both ends | Planned |
+| M3 | Updates over UART: application, update agent, resume, anti-rollback | Done, verified on hardware |
+| M4 | CAN link with ISO-TP on both ends | Next |
 | M5 | Gateway: Wi-Fi fetch, staging, pre-verification, per-node state | Planned |
 | M6 | Repeated-reset testing, throughput and timing measurements | Planned |
 
@@ -51,6 +51,15 @@ Each completed milestone is tagged on `main`.
 - **Distinct rejection reasons.** Corruption (bad hash), forgery (bad
   signature), a misplaced image (wrong slot) and a downgrade (rollback blocked)
   are recorded differently, so a fleet can be diagnosed remotely.
+- **Updates over UART.** The application receives an image into the slot it
+  is not running from, in 1 KB chunks each with its own CRC, and verifies the
+  whole image before marking it pending. An interrupted transfer resumes from
+  the last complete flash page, even across a reset.
+- **Confirmation with a deadline.** A trial image confirms itself only once
+  every task has stayed healthy and the gateway has asked for its status. That
+  one record makes it primary and raises the anti-rollback floor. A trial that
+  cannot confirm within 60s resets itself, so three such boots end in a
+  rollback.
 
 ### Verified on the NUCLEO-G474RE
 
@@ -60,6 +69,9 @@ Each completed milestone is tagged on `main`.
 | ECDSA P-256 verify at the 16 MHz reset clock | 1.7 s |
 | Worst-case verification, full 192 KB slot | 2.6 s |
 | Negative test images rejected on target with the expected reason | 13 of 13 |
+| Update over UART, 30.5 KB image at 115200 baud | 6.0 s transfer, then 2.0 s verification on the node |
+| From the start of an update to a confirmed image | about 16 s |
+| On-target update tests: both directions, downgrade, both rollback paths | 5 of 5 |
 
 ## Hardware
 
@@ -85,14 +97,18 @@ the signature trailer.
 
 ```
 bootloader/   bootloader: boot flow, Mbed TLS configuration
-drivers/      STM32G4 flash controller driver, shared by bootloader and app
-app/          FreeRTOS application and its slot A / slot B linker scripts
-common/       hardware-independent core shared by bootloader and host tests:
-              boot records and image verification
+drivers/      STM32G4 flash controller and LPUART1 drivers
+app/          FreeRTOS application: watchdog supervision, status LED, serial
+              link and updates; its slot A / slot B linker scripts
+common/       hardware-independent core shared by bootloader, app and host
+              tests: boot records, image verification, framing, protocol,
+              progress log and the update agent
 tests/host/   host test suite: flash simulator, boot records, power-fail
-              sweep, verifier cross-check against imgtool
-tools/        imgtool.py (keys, signing, verification, bad-image generation)
-              and the on-target negative test script
+              sweeps, verifier cross-check against imgtool, framing,
+              protocol, progress log and update agent
+tools/        imgtool.py (keys, signing, verification, bad-image generation),
+              node.py and link.py (the gateway's side of the serial link),
+              and the on-target test scripts
 bench/        on-target cost measurement of the verification path
 third_party/  Mbed TLS 3.6 LTS and FreeRTOS kernel V11.3.1, pinned as submodules
 docs/         design document and hardware notes
@@ -167,6 +183,33 @@ restores a clean state when done.
 
 ```bash
 .venv/bin/python tools/hw_negative_test.py
+```
+
+### Updating over UART
+
+With the node running, its serial port reaches the host through the
+ST-LINK's USB connection:
+
+```bash
+.venv/bin/python tools/node.py status
+.venv/bin/python tools/node.py update build-fw/app_slot_b.img --reboot
+```
+
+An image goes to the slot it was signed for, which must be the one the node
+is not running from. `--reboot` restarts the node into the new image on
+trial, then asks for STATUS until the image has confirmed itself or been
+rolled back.
+
+### On-target update tests
+
+Plays the gateway over the serial link: updates in both directions with
+confirmation, a refused downgrade, a refused update during a trial, and both
+rollback paths. About five minutes. `--quick` skips the three-minute trial
+deadline test. Destructive to the boot state and both slots; restores a clean
+state when done.
+
+```bash
+.venv/bin/python tools/hw_update_test.py
 ```
 
 ## License
