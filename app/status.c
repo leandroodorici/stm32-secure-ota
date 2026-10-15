@@ -24,9 +24,14 @@ static StackType_t g_stack[STATUS_STACK_WORDS];
 static supervisor_id_t g_id;
 static const boot_info_t *g_info;
 static volatile uint32_t g_activity;
+static volatile uint32_t g_confirmed;
 
 void status_set_activity(activity_t activity) {
     g_activity = (uint32_t)activity;
+}
+
+void status_set_confirmed(void) {
+    g_confirmed = 1u;
 }
 
 static void status_task(void *arg) {
@@ -60,7 +65,7 @@ static void status_task(void *arg) {
             colour = RGB_YELLOW;
         } else if (rejected && (step % REJECT_PERIOD_STEPS) < REJECT_FLASH_STEPS) {
             colour = RGB_RED;
-        } else if (trial && ((step / TRIAL_STEPS) % 2u) == 1u) {
+        } else if (trial && !g_confirmed && ((step / TRIAL_STEPS) % 2u) == 1u) {
             colour = RGB_OFF;
         }
         board_rgb(colour);

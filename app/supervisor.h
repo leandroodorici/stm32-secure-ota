@@ -29,6 +29,10 @@ void supervisor_beat(supervisor_id_t id);
 // Bounded, so a hang inside the operation still stops the watchdog being fed.
 void supervisor_excuse(supervisor_id_t id, uint32_t ms);
 
+// How many checks in a row have found every task alive and fed the
+// watchdog. Part of a trial image's health check.
+uint32_t supervisor_fed_in_a_row(void);
+
 // Creates the supervisor task. Called before the scheduler starts
 void supervisor_start(void);
 

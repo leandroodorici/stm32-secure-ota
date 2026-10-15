@@ -6,7 +6,8 @@
 
 // The node's side of the link to the gateway: receives framed messages over
 // LPUART1 and answers them. Answers STATUS_REQ, passes the update messages to
-// the update agent and acts on REBOOT.
+// the update agent and acts on REBOOT. Confirms an image booted on trial once
+// it is healthy, and resets one that has not confirmed in time.
 
 // Configures the UART and creates the comms task. Called before the
 // scheduler starts, after boot_info has been loaded.

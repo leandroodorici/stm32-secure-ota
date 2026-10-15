@@ -46,6 +46,17 @@
 // Longer REBOOT delays are shortened to this
 #define REBOOT_MAX_DELAY_MS 60000u
 
+// The health check of a trial image: every task has stayed alive for
+// this many supervisor checks in a row, about 5 s, and the gateway
+// then asks for STATUS. The image confirms itself before replying,
+// so that reply already shows it CONFIRMED.
+#define HEALTHY_CHECKS 5u
+
+// A trial image that has not confirmed by then resets itself, using up one
+// of its attempts. Otherwise an image that cannot reach its gateway would
+// stay on trial until something else reset it, refusing every update.
+#define TRIAL_DEADLINE_MS 60000u
+
 // This node's identifier. Fixed until there is more than one node on a bus.
 #define NODE_ID 1u
 
@@ -63,6 +74,7 @@ static upd_agent_t g_agent;
 static TickType_t g_last_update; // when the last update message arrived
 static uint32_t g_reboot_pending;
 static TickType_t g_reboot_at;
+static uint32_t g_on_trial; // booted on trial and not confirmed yet
 
 // Bytes travel from the interrupt to the task through a stream buffer: one
 // writer, one reader, which is exactly what a stream buffer is for
@@ -131,6 +143,14 @@ static void send_status(void) {
     }
 }
 
+static void confirm_if_healthy(void) {
+    if (g_on_trial && supervisor_fed_in_a_row() >= HEALTHY_CHECKS &&
+        upd_confirm(&g_agent, g_info->image_counter) == BR_RESULT_OK) {
+        g_on_trial = 0;
+        status_set_confirmed();
+    }
+}
+
 static void commit(void) {
     status_set_activity(ACTIVITY_VERIFYING);
     // Verification is one call that cannot report a heartbeat partway
@@ -156,6 +176,7 @@ static void handle_message(const uint8_t *msg, size_t len) {
     uint32_t value;
     switch (h.type) {
     case MSG_STATUS_REQ:
+        confirm_if_healthy();
         send_status();
         return;
     case MSG_OFFER:
@@ -205,6 +226,10 @@ static void check_timers(void) {
     if (g_reboot_pending && (int32_t)(now - g_reboot_at) >= 0) {
         board_reset();
     }
+    // The tick count started at zero when this image did
+    if (g_on_trial && now >= pdMS_TO_TICKS(TRIAL_DEADLINE_MS)) {
+        board_reset();
+    }
 }
 
 static void comms_task(void *arg) {
@@ -228,6 +253,7 @@ static void comms_task(void *arg) {
 void comms_start(const boot_info_t *info, const flash_if_t *flash) {
     g_info = info;
     g_flash = flash;
+    g_on_trial = info->state == SLOT_TRIAL;
     upd_init(&g_agent, flash, boot_pubkey, (uint8_t)info->slot);
     frame_rx_init(&g_frame);
     g_rx =

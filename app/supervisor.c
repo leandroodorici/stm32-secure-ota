@@ -23,6 +23,9 @@ static uint32_t g_count;
 // so the task can never interrupt the count down halfway.
 static volatile uint8_t g_grace[SUPERVISOR_MAX_TASKS];
 
+// Only the supervisor writes it, a whole word at a time
+static volatile uint32_t g_fed_in_a_row;
+
 static StaticTask_t g_tcb;
 static StackType_t g_stack[SUPERVISOR_STACK_WORDS];
 
@@ -34,6 +37,10 @@ supervisor_id_t supervisor_register(void) {
 void supervisor_beat(supervisor_id_t id) {
     g_alive[id] = 1u;
     g_grace[id] = 0u;
+}
+
+uint32_t supervisor_fed_in_a_row(void) {
+    return g_fed_in_a_row;
 }
 
 void supervisor_excuse(supervisor_id_t id, uint32_t ms) {
@@ -63,6 +70,11 @@ static void supervisor_task(void *arg) {
                 g_alive[i] = 0u;
             }
             IWDG_KR = IWDG_KEY_REFRESH;
+            if (g_fed_in_a_row < UINT32_MAX) {
+                g_fed_in_a_row++;
+            }
+        } else {
+            g_fed_in_a_row = 0;
         }
     }
 }

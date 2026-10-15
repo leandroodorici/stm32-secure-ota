@@ -30,4 +30,7 @@ void status_start(const boot_info_t *info);
 // What the update agent is doing, set by the comms task as it changes
 void status_set_activity(activity_t activity);
 
+// The running image, booted on trial, has confirmed itself: stop blinking
+void status_set_confirmed(void);
+
 #endif // STATUS_H
