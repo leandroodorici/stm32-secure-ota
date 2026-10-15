@@ -226,6 +226,20 @@ turning it back on, as Zephyr's driver for this part does. With that change
 boot with no fault and no missed heartbeat. The bootloader only writes the
 bank it runs from, but it shares the driver.
 
+**Confirmation and rollback.** Verified 2026-10-15 with
+`tools/hw_update_test.py`, which plays the gateway over the serial link.
+From slot A at security counter 1 and floor 0, an update to slot B at counter
+2 was sent, rebooted and polled with STATUS. It confirmed 16s after the
+transfer began, with slot B primary, both slots CONFIRMED and the floor at 2.
+An OFFER at counter 1 was then refused with ROLLBACK_BLOCKED. An update back
+to slot A at counter 3 confirmed the same way, with floor 3. Slot B, updated
+to counter 4 and rebooted, refused an OFFER during its trial with BUSY_TRIAL.
+Three resets over SWD before it could confirm returned the board to slot A,
+with slot B REJECTED, reason NOT_CONFIRMED and the floor still 3. A further
+update to slot B was rebooted and then left alone, with nothing sent over the
+link. The node reset itself at each 60s trial deadline and was back on slot
+A after 205s, with reset cause PIN + SW, not the watchdog.
+
 ## Do not do these
 
 **RDP level 2** on the G474. Irreversible, and there is one board.
@@ -243,7 +257,7 @@ Populated as milestones complete
 | Measurement | Value | Date |
 |-------------|-------|------|
 | Bootloader size | 20204 B text, 8 B data, 6488 B bss (full image verification; 6 KB of bss is the Mbed TLS buffer) | 2026-10-14 |
-| Application size | 29912 B text, 12 B data, 17012 B bss (adds the update agent and image verification; 6 KB of bss is the Mbed TLS buffer, 4 KB the comms stack) | 2026-10-14 |
+| Application size | 30164 B text, 12 B data, 17024 B bss (adds the update agent, image verification and confirmation; 6 KB of bss is the Mbed TLS buffer, 4 KB the comms stack) | 2026-10-15 |
 | Update over UART, 30.5 KB image | 6.0 s transfer at 115200 baud in 1 KB chunks, 2.0 s COMMIT | 2026-10-14 |
 | Comms task stack, peak | 1828 B of 4096, after a verification | 2026-10-14 |
 | Mbed TLS verify path | about 15.6 KB code (ECP, bignum, curve data, SHA-256, allocator) | 2026-09-30 |
