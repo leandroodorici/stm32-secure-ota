@@ -89,6 +89,8 @@ UPD_ERR_CHUNK_CRC = 36
 CHUNK_MAX = 1024
 
 SLOT_STATES = {0: "EMPTY", 1: "PENDING", 2: "TRIAL", 3: "CONFIRMED", 4: "REJECTED"}
+SLOT_CONFIRMED = 3
+SLOT_REJECTED = 4
 RESULTS = {0: "NONE", 1: "OK", 10: "BAD_MAGIC", 11: "BAD_HEADER", 12: "BAD_HASH",
            13: "BAD_SIGNATURE", 14: "WRONG_SLOT", 15: "ROLLBACK_BLOCKED",
            16: "NOT_CONFIRMED", 17: "FLASH_ERROR", 18: "CRYPTO_ERROR",
@@ -168,9 +170,9 @@ IMG_MAGIC = 0x31474D49  # "IMG1"
 SLOT_BASES = {0x08010000: 0, 0x08040000: 1}
 
 
-def image_offer(image, chunk_size=CHUNK_MAX, node=NODE_BROADCAST):
-    # The OFFER for a signed image, its fields read from the image's own
-    # header. The target is the slot the image was signed for.
+def image_header(image):
+    # (slot, version, security counter) from a signed image's header. The
+    # slot is the one the image was signed for.
     if len(image) < 28:
         raise ValueError("too short to be a signed image")
     magic, _, _, load_addr, _, version, _, counter = struct.unpack_from("<IHHIIIII", image)
@@ -178,7 +180,14 @@ def image_offer(image, chunk_size=CHUNK_MAX, node=NODE_BROADCAST):
         raise ValueError("not a signed image")
     if load_addr not in SLOT_BASES:
         raise ValueError(f"signed for 0x{load_addr:08x}, which is not a slot")
-    return offer(len(image), version, counter, SLOT_BASES[load_addr], chunk_size,
+    return SLOT_BASES[load_addr], version, counter
+
+
+def image_offer(image, chunk_size=CHUNK_MAX, node=NODE_BROADCAST):
+    # The OFFER for a signed image, its fields read from the image's own
+    # header, targeting the slot the image was signed for
+    slot, version, counter = image_header(image)
+    return offer(len(image), version, counter, slot, chunk_size,
                  hashlib.sha256(image).digest(), node)
 
 
@@ -252,6 +261,33 @@ def update(lk, image, chunk_size=CHUNK_MAX, progress=None, timeout=1.0,
     if reply[0] != MSG_VERIFY_RESULT or reply[1] != RESULT_OK:
         raise UpdateError(f"COMMIT: {result_name(reply[1])}")
     return resumed
+
+
+# Three trial boots, each lasting at most the node's 60 s trial deadline plus
+# a boot that verifies both slots, about 4 s, with margin
+OUTCOME_TIMEOUT = 220.0
+
+
+def await_outcome(status, slot, timeout=OUTCOME_TIMEOUT, poll=1.0,
+                  clock=time.monotonic, sleep=time.sleep):
+    # After REBOOT, asks for STATUS until the image in slot is confirmed, or
+    # the node is back on the other slot with that one REJECTED. The asking
+    # is itself part of the node's health check: a trial image confirms only
+    # when the gateway asks, so a gateway that never asked would see it roll
+    # back. status is a function returning a STATUS dict, or None while the
+    # node does not answer. Returns (True if confirmed, the last STATUS).
+    # Raises UpdateError if neither happens in time.
+    deadline = clock() + timeout
+    while clock() < deadline:
+        s = status()
+        if s is not None:
+            state = s["slot_state"][slot]
+            if s["running_slot"] == slot and state == SLOT_CONFIRMED:
+                return True, s
+            if s["running_slot"] != slot and state == SLOT_REJECTED:
+                return False, s
+        sleep(poll)
+    raise UpdateError(f"neither confirmed nor rolled back within {timeout:.0f} s")
 
 
 # ---- serial transport ----

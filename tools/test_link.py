@@ -190,5 +190,56 @@ try:
 except link.UpdateError as e:
     check("ROLLBACK_BLOCKED" in str(e), "a refused OFFER raises UpdateError with the reason")
 
+
+# ---- trial outcome ----
+
+def status(slot, states, last=1, floor=0):
+    return {"running_slot": slot, "slot_state": list(states), "last_result": last,
+            "security_floor": floor}
+
+
+class Clock:
+    # Time that passes only when the client sleeps
+    def __init__(self):
+        self.now = 0.0
+
+    def __call__(self):
+        return self.now
+
+    def sleep(self, s):
+        self.now += s
+
+
+def outcome(replies, timeout=10.0):
+    # replies are the STATUS dicts the node gives in turn, None for silence;
+    # the last is repeated
+    replies = list(replies)
+    clock = Clock()
+
+    def ask():
+        return replies.pop(0) if len(replies) > 1 else replies[0]
+    return link.await_outcome(ask, 1, timeout=timeout, clock=clock, sleep=clock.sleep)
+
+
+P, T, C, R = 1, 2, 3, 4
+ok, s = outcome([status(0, (C, P)), None, None, status(1, (C, T)), status(1, (C, T)),
+                 status(1, (C, C), floor=5)])
+check(ok and s["security_floor"] == 5, "waits through the reboot and the trial for CONFIRMED")
+
+ok, s = outcome([status(0, (C, P)), None, status(1, (C, T)), None, status(1, (C, T)), None,
+                 status(0, (C, R), last=16)])
+check(not ok and s["last_result"] == 16, "a rollback is reported with its reason")
+
+ok, _ = outcome([status(0, (C, P)), status(0, (C, P)), status(1, (C, T)), status(1, (C, C))])
+check(ok, "the old image answering before the reboot is not taken for a rollback")
+
+try:
+    outcome([status(1, (C, T))], timeout=5.0)
+    check(False, "a trial that never ends raises UpdateError")
+except link.UpdateError:
+    check(True, "a trial that never ends raises UpdateError")
+except IndexError:
+    check(False, "a trial that never ends raises UpdateError")
+
 print(f"\n{len(failures)} failure(s)")
 sys.exit(1 if failures else 0)

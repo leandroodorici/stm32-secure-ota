@@ -64,8 +64,23 @@ def cmd_update(args):
         if args.reboot:
             lk.send(link.reboot(0))
             print("REBOOT sent: the bootloader starts the new image on trial")
+            await_outcome(lk, link.image_header(image)[0])
     finally:
         lk.close()
+
+
+def await_outcome(lk, slot):
+    start = time.monotonic()
+    try:
+        confirmed, s = link.await_outcome(lk.status, slot)
+    except link.UpdateError as e:
+        sys.exit(f"trial failed: {e}")
+    took = time.monotonic() - start
+    if not confirmed:
+        sys.exit(f"rolled back to slot {'AB'[s['running_slot']]} after {took:.0f} s: "
+                 f"{link.result_name(s['last_result'])}")
+    print(f"slot {'AB'[slot]} confirmed and primary in {took:.0f} s, "
+          f"security floor {s['security_floor']}")
 
 
 def cmd_reboot(args):
@@ -86,7 +101,8 @@ def main():
     p = sub.add_parser("update", help="send a signed image to the slot it was signed for")
     p.add_argument("image")
     p.add_argument("--chunk", type=int, default=link.CHUNK_MAX)
-    p.add_argument("--reboot", action="store_true", help="reboot once it is PENDING")
+    p.add_argument("--reboot", action="store_true",
+                   help="reboot once it is PENDING, then wait for the trial's outcome")
     p.set_defaults(func=cmd_update)
 
     p = sub.add_parser("reboot")
