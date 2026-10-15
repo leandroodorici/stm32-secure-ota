@@ -6,7 +6,7 @@
 #include "board.h"
 #include "supervisor.h"
 
-// See fault.h.
+// See fault.h
 #define FAULT_POLL_MS 50u
 #define FAULT_PRIORITY 2u
 #define FAULT_STACK_WORDS 128u

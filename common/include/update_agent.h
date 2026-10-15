@@ -9,7 +9,7 @@
 #include "progress.h"
 #include "protocol.h"
 
-// The node's side of an update (docs/DESIGN.md sections 6 and 9).
+// The node's side of an update
 //
 // Receives an image into the slot the node is not running from, and marks it
 // PENDING once the whole slot verifies. Independent of the transport: the

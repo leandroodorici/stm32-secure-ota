@@ -1,8 +1,7 @@
 #ifndef FREERTOS_CONFIG_H
 #define FREERTOS_CONFIG_H
 
-// FreeRTOS configuration for the application. The bootloader does not use an
-// RTOS (docs/DESIGN.md section 8.1).
+// FreeRTOS configuration for the application. The bootloader does not use an RTOS.
 //
 // Everything is statically allocated: no heap implementation is linked, so
 // every task's memory is visible in the map file and nothing can fail to
@@ -60,10 +59,9 @@
 // ---- interrupt priorities ----
 //
 // The G474 implements 4 priority bits, so priorities run 0 (highest) to 15.
-// The kernel runs at the lowest. Interrupts at numerically 5 or above (lower
-// urgency) may call FreeRTOS "FromISR" functions; anything above that is
-// never delayed by the kernel but must not touch it. Getting this wrong is
-// the most common FreeRTOS bug on Cortex-M, and configASSERT catches it.
+// The kernel runs at the lowest. Interrupts at number 5 or above (lower
+// urgency) may call FreeRTOS "FromISR" functions. Anything above that is
+// never delayed by the kernel but must not touch it.
 #define configPRIO_BITS 4U
 #define configLIBRARY_LOWEST_INTERRUPT_PRIORITY 15U
 #define configLIBRARY_MAX_SYSCALL_INTERRUPT_PRIORITY 5U
