@@ -1,43 +1,69 @@
 #include <stdint.h>
 
-#include "boot_handoff.h"
+#include "FreeRTOS.h"
+#include "task.h"
 
-// LD2, the user LED on the NUCLEO-G474RE, is on PA5
-#define RCC_AHB2ENR (*(volatile uint32_t *)0x4002104Cu)
-#define GPIOA_MODER (*(volatile uint32_t *)0x48000000u)
-#define GPIOA_ODR (*(volatile uint32_t *)0x48000014u)
+#include "board.h"
+#include "boot_info.h"
+#include "comms.h"
+#include "fault.h"
+#include "flash_stm32.h"
+#include "status.h"
+#include "supervisor.h"
 
-// The bootloader has already started the independent watchdog and nothing can
-// stop it, so from the first instruction the application must refresh it.
-#define IWDG_KR (*(volatile uint32_t *)0x40003000u)
-#define IWDG_KEY_REFRESH 0xAAAAu
+static flash_if_t g_flash;
 
-#define LED_PIN 5u
+// How this image was booted. Not static, so it can be read over SWD by symbol
+// name: mdw &g_boot_info 8.
+boot_info_t g_boot_info;
 
 int main(void) {
-    // Blink fast after a watchdog reset, so the cause is visible without a
-    // debugger. The magic check guards against an application started some
-    // other way, where this RAM holds whatever was there before.
-    uint32_t delay = 400000u;
-    if (BOOT_HANDOFF->magic == BOOT_HANDOFF_MAGIC &&
-        (BOOT_HANDOFF->reset_flags & RESET_FLAG_IWDG) != 0u) {
-        delay = 100000u;
-    }
+    board_init();
 
-    // Every peripheral is clock-gated off at reset. Enable GPIOA first.
-    // Writing to its registers before this has no effect at all.
-    RCC_AHB2ENR |= (1u << 0);
+    flash_stm32_bind(&g_flash);
+    boot_info_load(&g_flash, &g_boot_info);
 
-    // MODER holds 2 bits per pin. 01 is general-purpose output
-    GPIOA_MODER &= ~(3u << (LED_PIN * 2));
-    GPIOA_MODER |= (1u << (LED_PIN * 2));
+    // Every task that must keep running registers with the supervisor as it
+    // is created, so the supervisor starts last
+    status_start(&g_boot_info);
+    fault_start();
+    comms_start(&g_boot_info, &g_flash);
+    supervisor_start();
 
+    vTaskStartScheduler();
+
+    // Only reached if the scheduler could not start
+    app_assert_failed(__FILE__, __LINE__);
+    return 0;
+}
+
+// ---- FreeRTOS hooks ----
+
+// With dynamic allocation disabled, the kernel asks the application for the
+// idle task's memory
+void vApplicationGetIdleTaskMemory(StaticTask_t **tcb, StackType_t **stack,
+                                   configSTACK_DEPTH_TYPE *stack_words) {
+    static StaticTask_t idle_tcb;
+    static StackType_t idle_stack[configMINIMAL_STACK_SIZE];
+
+    *tcb = &idle_tcb;
+    *stack = idle_stack;
+    *stack_words = configMINIMAL_STACK_SIZE;
+}
+
+void vApplicationStackOverflowHook(TaskHandle_t task, char *name) {
+    (void)task;
+    (void)name;
+    app_assert_failed(__FILE__, __LINE__);
+}
+
+// See configASSERT in FreeRTOSConfig.h. Interrupts stay off, so nothing else
+// runs and the supervisor stops feeding the watchdog. The arguments are left
+// for a debugger to inspect.
+void app_assert_failed(const char *file, int line) {
+    (void)file;
+    (void)line;
+    taskDISABLE_INTERRUPTS();
     for (;;) {
-        IWDG_KR = IWDG_KEY_REFRESH;
-        GPIOA_ODR ^= (1u << LED_PIN);
-        // Crude delay. The core runs at 16 MHz from HSI after reset, so this
-        // gives a visible blink. A timer comes later.
-        for (volatile uint32_t i = 0; i < delay; i++) {
-        }
     }
 }

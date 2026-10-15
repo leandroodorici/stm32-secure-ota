@@ -162,6 +162,84 @@ variants), BAD_HASH, BAD_SIGNATURE (four variants), WRONG_SLOT and
 ROLLBACK_BLOCKED. The board came back up on slot A each time. The good image
 entered TRIAL and ran from slot B.
 
+**FreeRTOS and watchdog supervision.** Verified 2026-10-05. The application
+runs FreeRTOS V11.3.1 with static allocation only. The kernel tick advanced
+by about 1000 per second, measured by reading `xTickCount` over SWD, and a
+halt landed in the idle task on the process stack. The watchdog is fed only
+by a supervisor task, and only when every registered task has reported a
+heartbeat. With the blinker's heartbeat removed but the task still running, 
+the part reset after about 4 s with reset cause `0x24000000` (IWDG + PIN). 
+With it restored, the application ran indefinitely.
+
+**Status LED and fault button.** Verified 2026-10-07. A common-cathode RGB
+LED on the breadboard shows the system state, one resistor per channel: red
+on PA8 (D7), green on PB10 (D6), blue on PB5 (D4). Every pin and colour,
+including the mixed ones, was checked over SWD before any firmware drove
+them. B1 on PC13 reads 1 while pressed and 0 when released, measured by
+sampling it over SWD. This is the opposite of what Zephyr's board file for
+this board declares.
+
+Pressing B1 makes the fault task stop reporting its heartbeat while it keeps
+running. With slot B marked PENDING, one press on each of three trial boots
+made the supervisor withhold the watchdog each time. The bootloader then
+rejected slot B with reason 16 and the board returned to slot A, which reads
+seq 11 and last result 16 from its boot record. The whole trial and rollback
+sequence was observed on the LED, without a debugger.
+
+**Serial link and STATUS.** Verified 2026-10-10. LPUART1 on PA2/PA3 reaches
+the host through the ST-LINK's USB serial port at 115200 baud, receiving in
+an interrupt at priority 6 into a FreeRTOS stream buffer. `tools/node.py
+status` returned the node's state, which matched the boot record. The
+reported reset cause followed real events: `PIN + SW` after an OpenOCD
+reset, `PIN` after B2, and `PIN + IWDG` after a fault injected with B1.
+Twenty consecutive requests all succeeded. After 4 KB of random bytes were
+written to the port, the next request was answered normally. The receiver
+drops invalid frames and resynchronises at the next delimiter.
+
+**Updates over UART.** Verified 2026-10-14. `tools/node.py update` sent a
+30.5 KB image signed for slot B to the application running from slot A, in
+1 KB chunks: 6.0 s of transfer, then 2.0 s for COMMIT, which hashes and
+verifies the whole image on the node. STATUS then reported slot B PENDING
+with last result OK, and an unchanged reset cause, so verification did not
+trip the watchdog. Sampling the LED pins over SWD showed yellow throughout
+the transfer, magenta for about 1.8 s of verification, then green. An update
+stopped after 14336 bytes, followed by `node.py reboot`, resumed at that
+offset, a page boundary, and completed. `node.py reboot` after COMMIT started
+slot B on trial with a blinking blue LED, and a new OFFER was refused with
+BUSY_TRIAL. Three resets without confirmation returned the board to slot A,
+with slot B REJECTED and last result NOT_CONFIRMED shown as a red flash every
+2 s. The comms task's stack, filled with 0xA5 when the task is created, had
+used at most 1828 of its 4096 bytes after a verification.
+
+**Data cache corruption during read-while-write.** Found 2026-10-14. Repeated
+updates failed about once in twenty: usually a HardFault in the SysTick
+handler followed by a watchdog reset, and once a FLASH_ERROR reply with no
+reset. A diagnostic build logging to CCM SRAM, which survives a reset,
+caught a precise bus fault on a read from a meaningless address while the
+update agent was programming bank 2, with PGSERR and PGAERR set in the flash
+status register by a stray write. Both are what a corrupted constant, loaded
+from bank 1, produces. This is erratum 2.2.2 of ES0430, "Data cache might be
+corrupted during Flash memory read-while-write operation". The driver now
+turns the data cache off for each program and erase, and resets it before
+turning it back on, as Zephyr's driver for this part does. With that change
+150 consecutive updates, about 1.2 million flash operations, completed in one
+boot with no fault and no missed heartbeat. The bootloader only writes the
+bank it runs from, but it shares the driver.
+
+**Confirmation and rollback.** Verified 2026-10-15 with
+`tools/hw_update_test.py`, which plays the gateway over the serial link.
+From slot A at security counter 1 and floor 0, an update to slot B at counter
+2 was sent, rebooted and polled with STATUS. It confirmed 16s after the
+transfer began, with slot B primary, both slots CONFIRMED and the floor at 2.
+An OFFER at counter 1 was then refused with ROLLBACK_BLOCKED. An update back
+to slot A at counter 3 confirmed the same way, with floor 3. Slot B, updated
+to counter 4 and rebooted, refused an OFFER during its trial with BUSY_TRIAL.
+Three resets over SWD before it could confirm returned the board to slot A,
+with slot B REJECTED, reason NOT_CONFIRMED and the floor still 3. A further
+update to slot B was rebooted and then left alone, with nothing sent over the
+link. The node reset itself at each 60s trial deadline and was back on slot
+A after 205s, with reset cause PIN + SW, not the watchdog.
+
 ## Do not do these
 
 **RDP level 2** on the G474. Irreversible, and there is one board.
@@ -178,7 +256,10 @@ Populated as milestones complete
 
 | Measurement | Value | Date |
 |-------------|-------|------|
-| Bootloader size | 20176 B text, 8 B data, 6488 B bss (full image verification; 6 KB of bss is the Mbed TLS buffer) | 2026-10-01 |
+| Bootloader size | 20204 B text, 8 B data, 6488 B bss (full image verification; 6 KB of bss is the Mbed TLS buffer) | 2026-10-14 |
+| Application size | 30164 B text, 12 B data, 17024 B bss (adds the update agent, image verification and confirmation; 6 KB of bss is the Mbed TLS buffer, 4 KB the comms stack) | 2026-10-15 |
+| Update over UART, 30.5 KB image | 6.0 s transfer at 115200 baud in 1 KB chunks, 2.0 s COMMIT | 2026-10-14 |
+| Comms task stack, peak | 1828 B of 4096, after a verification | 2026-10-14 |
 | Mbed TLS verify path | about 15.6 KB code (ECP, bignum, curve data, SHA-256, allocator) | 2026-09-30 |
 | Cold boot to application | | |
 | SHA-256 over a full slot | 901 ms at 16 MHz (14.41 M cycles, 73 cycles/byte), `MBEDTLS_SHA256_SMALLER` | 2026-09-30 |

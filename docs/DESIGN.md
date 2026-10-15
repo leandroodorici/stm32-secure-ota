@@ -93,6 +93,14 @@ milliseconds, and a single-bank configuration would stall the CPU for that
 entire period. Stalls of that length cause dropped CAN frames and missed
 sensor samples during an update.
 
+Reading one bank while writing the other needs one precaution on this part.
+Erratum 2.2.2 of ES0430 lets the flash data cache be corrupted while the
+other bank is programmed or erased, so the driver turns the data cache off
+for each operation. Two kinds of write do stall the CPU: boot records, in bank 1, 
+and the progress log, in bank 2, which is the running bank when the application 
+runs from slot B. Both are short, written at most once per 2 KB received, and the 
+stop-and-wait protocol has nothing in flight while they happen.
+
 Within a slot, the image header occupies the first 512 bytes and the vector
 table begins at offset 0x200. The offset is not arbitrary. The Cortex-M4 vector
 table offset register requires the table to be aligned to a power of two at
@@ -204,7 +212,10 @@ Slot states are EMPTY, PENDING, TRIAL, CONFIRMED and REJECTED. Ownership of
 transitions is split. The application sets a slot EMPTY before erasing it and
 PENDING once a complete image has been written and verified. The bootloader
 moves PENDING to TRIAL, and TRIAL to REJECTED on failed verification or
-exhausted attempts. The application moves TRIAL to CONFIRMED.
+exhausted attempts. The application moves TRIAL to CONFIRMED, in one record
+that also makes that slot primary and raises the security floor to the
+image's counter (section 8.5). The other slot keeps its state, so a
+confirmed previous image stays a fallback for as long as the floor allows it.
 
 Two invariants the update agent enforces: it never writes to the primary slot,
 and it refuses a new update while the running image is still in TRIAL, because
@@ -330,9 +341,28 @@ is unusable in the field, and if its update path is broken it can never be
 repaired remotely. Tying confirmation to a working update path means the device
 can only commit to an image it could subsequently replace.
 
+The health check is two conditions. Every supervised task has stayed alive
+for five consecutive supervisor checks, about 5s, and the gateway has then
+sent STATUS_REQ. The node confirms before it replies, so the gateway learns
+of the confirmation from that same STATUS. The gateway drives this: after
+REBOOT it polls STATUS until the image is confirmed or rolled back. A trial
+image that has not confirmed 60s after starting resets itself. Without that
+deadline, an image that cannot reach its gateway would stay on trial, and
+refuse every update, until something else reset it. With it, three such
+boots end in a rollback with no help from outside.
+
 The independent watchdog is fed by a supervisor task that checks a heartbeat
 from every other task. It is never fed from the idle hook, which would allow a
 deadlocked task to go unnoticed while the watchdog stays happy.
+
+A task busy with one long operation cannot report a heartbeat partway
+through. COMMIT verifies the whole image in a single call, about 2 s for a
+30 KB image and 2.6 s for a full slot. Before it starts, the comms task
+excuses itself from the supervisor's checks for a bounded time, 4 s, and its
+next heartbeat ends the excuse. A verification that hangs still stops the
+watchdog being fed once the excuse runs out. The comms task runs at the
+status task's priority, so during verification the two share the processor
+rather than one starving the other.
 
 ### 8.5 Anti-rollback with a separate counter
 
@@ -501,6 +531,11 @@ same reason as `tools/imgtool.py` for every image in a generated set
 (`tests/host/test_image_verify.c`), so the two verifiers cannot drift apart.
 On the board, `tools/hw_negative_test.py` writes each image into slot B, marks
 it PENDING, resets, and checks the reason the bootloader records.
+
+`tools/hw_update_test.py` drives the update path on the board the way the
+gateway will, over the serial link: updates in both directions with
+confirmation, a refused downgrade, a refused update during a trial, and
+rollback both after repeated resets and at the trial deadline.
 
 On hardware, the update path is exercised repeatedly with a reset asserted at a
 random point in each cycle, with the outcome logged per cycle.

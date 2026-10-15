@@ -6,10 +6,14 @@
 #include <stdint.h>
 
 // Uses the real base address so addresses in tests match the flash map in
-// docs/DESIGN.md. Eight pages covers the boot state pages plus room to
-// exercise range checks.
+// docs/DESIGN.md. Eight pages are enough for the boot record and power-cut
+// tests, which run thousands of times and reinitialise the simulator each
+// time. A test that needs the real flash map builds it with SIM_PAGES=256,
+// the whole 512 KB.
 #define SIM_BASE 0x08000000u
+#ifndef SIM_PAGES
 #define SIM_PAGES 8u
+#endif
 #define SIM_SIZE (SIM_PAGES * FLASH_PAGE_SIZE)
 #define SIM_DW_COUNT (SIM_SIZE / FLASH_DW_SIZE)
 
